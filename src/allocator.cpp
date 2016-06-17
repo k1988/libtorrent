@@ -148,6 +148,7 @@ namespace libtorrent
 
 	void page_free(char* const block, std::int64_t const size)
 	{
+		TORRENT_UNUSED(size);
 		if (block == nullptr) return;
 
 #if TORRENT_HAVE_MMAP

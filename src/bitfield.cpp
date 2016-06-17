@@ -236,7 +236,7 @@ namespace libtorrent
 				if ((last & 1) == 1) continue;
 				return i * 32 + 31 - k;
 			}
-			TORRENT_ASSERT(false && "how is this possible?");
+			TORRENT_ASSERT_FAIL();
 			return -1;
 		}
 
