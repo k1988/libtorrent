@@ -97,7 +97,7 @@ namespace libtorrent
 		bool need_readback;
 	};
 
-	typedef tailqueue<disk_io_job> jobqueue_t;
+	using jobqueue_t = tailqueue<disk_io_job>;
 
 	// this struct holds a number of statistics counters
 	// relevant for the disk io thread and disk cache.
@@ -573,6 +573,7 @@ namespace libtorrent
 		disk_io_thread_pool m_generic_threads;
 		job_queue m_hash_io_jobs;
 		disk_io_thread_pool m_hash_threads;
+		jobqueue_t m_waiting_for_buffer;
 
 		aux::session_settings m_settings;
 

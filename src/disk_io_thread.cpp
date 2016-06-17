@@ -1066,7 +1066,7 @@ namespace libtorrent
 			std::unique_lock<std::mutex> l2(m_job_mutex);
 			if (!m_waiting_for_buffer.empty())
 			{
-				m_queued_jobs.prepend(m_waiting_for_buffer);
+				m_generic_io_jobs.m_queued_jobs.prepend(m_waiting_for_buffer);
 			}
 		}
 	}
