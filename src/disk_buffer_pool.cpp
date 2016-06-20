@@ -142,7 +142,7 @@ namespace libtorrent
 		if (m_cache_pool)
 		{
 			return buffer >= m_cache_pool && buffer < m_cache_pool
-				+ std::uint64_t(m_max_use) * m_block_size;
+				+ std::uint64_t(m_max_size) * m_block_size;
 		}
 		return false;
 	}
