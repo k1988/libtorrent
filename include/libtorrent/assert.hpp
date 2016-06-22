@@ -108,6 +108,14 @@ extern char const* libtorrent_assert_log;
 
 #else // TORRENT_USE_ASSERTS
 
+#pragma warning(disable:4267)
+#pragma warning(disable:4244)
+#pragma warning(disable:4800)
+#pragma warning(disable:4099)
+#pragma warning(disable:4018)
+#pragma warning(disable:4355)
+#pragma warning(disable:4101)
+
 #define TORRENT_ASSERT_PRECOND(a) do {} TORRENT_WHILE_0
 #define TORRENT_ASSERT(a) do {} TORRENT_WHILE_0
 #define TORRENT_ASSERT_VAL(a, b) do {} TORRENT_WHILE_0

@@ -191,6 +191,15 @@ namespace libtorrent
 		void thread_started()
 		{ m_single_thread = pthread_self(); }
 
+
+		void flush(){
+#if TORRENT_USE_IOSTREAM
+			mutex::scoped_lock l(file_mutex);
+			open(false);
+			log_file.flush();
+#endif
+		}
+
 		void transfer_ownership()
 		{ m_single_thread = 0; }
 

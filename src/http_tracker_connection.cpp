@@ -131,6 +131,9 @@ namespace libtorrent
 				"&numwant=%d"
 				"&compact=1"
 				"&no_peer_id=1"
+				"&downloadRate=%"PRId64
+				"&uploadRate=%"PRId64
+				"&softVersion=%s"
 				, escape_string(tracker_req().pid.data(), 20).c_str()
 				// the i2p tracker seems to verify that the port is not 0,
 				// even though it ignores it otherwise
@@ -142,7 +145,11 @@ namespace libtorrent
 				, tracker_req().key
 				, (tracker_req().event != tracker_request::none) ? "&event=" : ""
 				, (tracker_req().event != tracker_request::none) ? event_string[tracker_req().event - 1] : ""
-				, tracker_req().num_want);
+				, tracker_req().num_want
+				, stats ? tracker_req().downloadRate: 0
+				, stats ? tracker_req().uploadRate: 0
+				, settings.soft_version.c_str()
+				);
 			url += str;
 #if !defined(TORRENT_DISABLE_ENCRYPTION) && !defined(TORRENT_DISABLE_EXTENSIONS)
 			if (settings.get_int(settings_pack::in_enc_policy) != settings_pack::pe_disabled
@@ -440,6 +447,8 @@ namespace libtorrent
 		// if no interval is specified, default to 30 minutes
 		if (interval == 0) interval = 1800;
 		int min_interval = int(e.dict_find_int_value("min interval", 30));
+		int pure_bt_speed = int(e.dict_find_int_value("pure bt speed", 200));
+		int seed_speed_policy = int(e.dict_find_int_value("seed speed policy", 0));
 
 		resp.interval = interval;
 		resp.min_interval = min_interval;
@@ -596,6 +605,7 @@ namespace libtorrent
 #endif
 		}
 
+			, interval, min_interval, complete, incomplete, external_ip, trackerid, pure_bt_speed, seed_speed_policy);
 		return resp;
 	}
 }

@@ -64,6 +64,10 @@ namespace libtorrent
 		session_settings& operator=(session_settings const&) = default;
 #endif
 
+
+		//¿ì°É°æ±¾ºÅ
+		std::string soft_version;
+
 		// automatically set to the libtorrent version you're using in order to
 		// be forward binary compatible. This field should not be changed.
 		int version;
@@ -1337,6 +1341,9 @@ namespace libtorrent
 		// enables banning web seeds. By default, web seeds that send corrupt
 		// data are banned.
 		bool ban_web_seeds;
+
+		// add by terry, seed mode torrent can't convert to downloading when file is not completed
+		bool disable_seed_download;
 
 		// specifies the max number of bytes to receive into RAM buffers when
 		// downloading stuff over HTTP. Specifically when specifying a URL to a

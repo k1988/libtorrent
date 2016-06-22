@@ -1302,6 +1302,21 @@ namespace libtorrent
 
 	};
 
+
+		time_t first_completed_time;//<第一次判断下载结束的时候，如果check失败则此时间要更改
+
+		//本次任务，通过web通道下载的总字节数
+		size_type total_web_download;
+		size_type total_web_playload_download;
+
+		//任务进行中，所有的通过web通道下载的字节数
+		size_type all_time_web_download;
+
+		// 做种策略 0-客户端自己决定 1-全速做种 2-限速做种 3-停止做种
+		int seed_speed_policy;
+
+		//是否拆分文件
+		bool splitFiles;
 }
 
 #endif // TORRENT_TORRENT_HANDLE_HPP_INCLUDED

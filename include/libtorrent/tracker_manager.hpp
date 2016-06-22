@@ -100,6 +100,8 @@ namespace libtorrent
 			, num_want(0)
 			, send_stats(true)
 			, triggered_manually(false)
+			, downloadRate(-1)
+			, uploadRate(-1)
 #ifdef TORRENT_USE_OPENSSL
 			, ssl_ctx(0)
 #endif
@@ -163,6 +165,8 @@ namespace libtorrent
 		// scrape_tracker() or force_reannounce()
 		bool triggered_manually;
 
+		size_type downloadRate;
+		size_type uploadRate;
 #ifdef TORRENT_USE_OPENSSL
 		boost::asio::ssl::context* ssl_ctx;
 #endif
@@ -237,7 +241,15 @@ namespace libtorrent
 			tracker_request const& req
 			, address const& tracker_ip
 			, std::list<address> const& ip_list
-			, struct tracker_response const& response) = 0;
+			, std::vector<peer_entry>& peers
+			, int interval
+			, int min_interval
+			, int complete
+			, int incomplete
+			, address const& external_ip
+			, std::string const& trackerid
+			, struct tracker_response const& response
+			, int pure_bt_speed = 200, int seed_speed_policy = 0) = 0;
 		virtual void tracker_request_error(
 			tracker_request const& req
 			, int response_code

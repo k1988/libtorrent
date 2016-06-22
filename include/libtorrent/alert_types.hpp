@@ -1088,8 +1088,13 @@ namespace libtorrent
 	// out of the ``checking files`` state into a state where it is ready to start downloading
 	struct TORRENT_EXPORT torrent_checked_alert TORRENT_FINAL : torrent_alert
 	{
+		torrent_checked_alert(torrent_handle const& h, bool finished)
+			: torrent_alert(h)
+			,m_finished(finished)
+		{}
 		// internal
 		torrent_checked_alert(aux::stack_allocator& alloc, torrent_handle const& h);
+		bool m_finished;
 
 		TORRENT_DEFINE_ALERT(torrent_checked_alert, 41)
 
