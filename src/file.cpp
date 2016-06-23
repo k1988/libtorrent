@@ -89,6 +89,11 @@ POSSIBILITY OF SUCH DAMAGE.
 #ifdef TORRENT_WINDOWS
 // windows part
 
+#ifndef ERROR_CANT_WAIT
+// add by terry, from windows sdk 7.1 <winerror.h>
+#define ERROR_CANT_WAIT                  554L
+#endif
+
 #ifndef PtrToPtr64
 #define PtrToPtr64(x) (x)
 #endif

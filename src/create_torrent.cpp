@@ -323,6 +323,7 @@ namespace libtorrent
 		, m_merkle_torrent((flags & merkle) != 0)
 		, m_include_mtime((flags & modification_time) != 0)
 		, m_include_symlinks((flags & symlinks) != 0)
+		, m_splitFiles(false)
 	{
 		// return instead of crash in release mode
 		if (fs.num_files() == 0 || fs.total_size() == 0) return;
@@ -382,6 +383,7 @@ namespace libtorrent
 		, m_merkle_torrent(ti.is_merkle_torrent())
 		, m_include_mtime(false)
 		, m_include_symlinks(false)
+		, m_splitFiles(false)
 	{
 		TORRENT_ASSERT(ti.is_valid());
 		TORRENT_ASSERT(ti.num_pieces() > 0);

@@ -4269,6 +4269,8 @@ namespace libtorrent
 			// make sure we keep all the stats!
 			if (!m_ignore_stats)
 			{
+				t->add_stats(statistics(), this);
+
 				// report any partially received payload as redundant
 				boost::optional<piece_block_progress> pbp = downloading_piece_progress();
 				if (pbp

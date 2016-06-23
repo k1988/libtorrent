@@ -140,6 +140,14 @@ namespace libtorrent
 	{
 		request += "Host: ";
 		request += m_host;
+		if (m_port != 80)
+		{
+			request += ":";	
+			char buffer[20] = {0};
+			_itoa(m_port, buffer, 10);
+			request += buffer;
+		}
+
 		if (m_first_request || m_settings.get_bool(settings_pack::always_send_user_agent)) {
 			request += "\r\nUser-Agent: ";
 			request += m_settings.get_str(settings_pack::user_agent);

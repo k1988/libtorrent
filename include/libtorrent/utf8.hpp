@@ -71,6 +71,8 @@ namespace libtorrent
 		const std::string &utf8, std::wstring &wide);
 	TORRENT_EXTRA_EXPORT utf8_conv_result_t wchar_utf8(
 		const std::wstring &wide, std::string &utf8);
+	TORRENT_EXPORT std::string utf8_to_local(std::string const& s);
+	TORRENT_EXPORT std::string local_to_utf8(std::string const &s);
 }
 #endif // !BOOST_NO_STD_WSTRING
 

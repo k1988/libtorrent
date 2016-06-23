@@ -167,6 +167,11 @@ namespace libtorrent
 	void tracker_connection::fail(error_code const& ec, int code
 		, char const* msg, int interval, int min_interval)
 	{
+#if defined(TORRENT_VERBOSE_LOGGING) || defined(TORRENT_LOGGING)		
+		char buffer[1024];
+		sprintf_s(buffer, "%s *** tracker fail: %s&info_hash=%s&event=%d   error:%s,%s\n", time_now_string(), m_req.url.c_str(), libtorrent::to_hex(m_req.info_hash.to_string()).c_str(), m_req.event, ec.message().c_str(), msg);
+		OutputDebugStringA(buffer);
+#endif
 		// we need to post the error to avoid deadlock
 			get_io_service().post(boost::bind(&tracker_connection::fail_impl
 					, shared_from_this(), ec, code, std::string(msg), interval, min_interval));

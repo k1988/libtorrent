@@ -599,6 +599,8 @@ namespace libtorrent
 			// throughput. It also makes the cache less likely and slower at
 			// returning memory back to the system, once allocated.
 			use_disk_cache_pool,
+            
+            disable_seed_download,
 
 			// when this is true, and incoming encrypted connections are enabled,
 			// &supportcrypt=1 is included in http tracker announces

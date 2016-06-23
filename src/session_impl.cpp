@@ -3224,11 +3224,17 @@ retry:
 							++num_peers[protocol][peer_connection::upload_channel];
 					}
 
+#ifdef _DEBUG
+					char buf[1024] = {};
+					sprintf(buf, "current peers, tcp(d:%d,u:%d),udp(d:%d,u:%d)", num_peers[0][1], num_peers[0][0], num_peers[1][1], num_peers[1][0]);
+					OutputDebugStringA(buf);
+#endif // _DEBUG
+
 					peer_class* pc = m_classes.at(m_tcp_peer_class);
 					bandwidth_channel* tcp_channel = pc->channel;
 					int stat_rate[] = {m_stat.upload_rate(), m_stat.download_rate() };
-					// never throttle below this
-					int lower_limit[] = {5000, 30000};
+					//MODIFY by zhaohaoyang 2012/11/14.
+					int lower_limit[] = {300000, 300000};
 
 					for (int i = 0; i < 2; ++i)
 					{
@@ -4632,6 +4638,11 @@ retry:
 		std::vector<torrent*>& state_updates
 			= m_torrent_lists[aux::session_impl::torrent_state_updates];
 
+		if (m_state_updates.empty())
+		{
+			//FIXME Modify by terry 2012.5.3 当没有状态更新时就不发送alert，以防止外部调用者频繁调用此函数引起的alert风暴
+			return;
+		}
 #if TORRENT_USE_ASSERTS
 		m_posting_torrent_updates = true;
 #endif
@@ -4655,7 +4666,7 @@ retry:
 			// the torrent to be loaded. Loading a torrent, and evicting another
 			// one will lead to calling state_updated(), which screws with
 			// this list while we're working on it, and break things
-			t->status(&status.back(), flags);
+			t->status(&status.back(), 0xffffffff); //<精确计算已下载的大小
 			t->clear_in_state_update();
 		}
 		state_updates.clear();
@@ -6071,6 +6082,10 @@ retry:
 	{
 		// this is not allowed to be the network thread!
 //		TORRENT_ASSERT(is_not_thread());
+#if defined TORRENT_VERBOSE_LOGGING
+		(*m_logger) << time_now_string() << ": ~session_impl"  << "\n";
+#endif
+		m_io_service.post(boost::bind(&session_impl::abort, this));
 
 		m_udp_socket.unsubscribe(this);
 		m_udp_socket.unsubscribe(&m_utp_socket_manager);
@@ -6080,6 +6095,35 @@ retry:
 		m_ssl_udp_socket.unsubscribe(this);
 		m_ssl_udp_socket.unsubscribe(&m_ssl_utp_socket_manager);
 #endif
+
+#if defined TORRENT_VERBOSE_LOGGING
+		(*m_logger) << time_now_string() << ": session_impl::~session_impl disk thread stopped."  << "\n";
+#endif
+
+		//Add by terry,等待超时后使用io_service::stop停止所有异步调用
+		libtorrent::deadline_timer stopIoTimer(m_io_service);
+		stopIoTimer.expires_from_now(libtorrent::time_duration(2));
+		stopIoTimer.async_wait(boost::bind(&io_service::stop, &m_io_service));
+
+#if defined TORRENT_ASIO_DEBUGGING
+		int counter = 0;
+		while (log_async())
+		{
+			sleep(1000);
+			++counter;
+			printf("\n==== Waiting to shut down: %d ==== conn-queue: %d connecting: %d timeout (next: %f max: %f)\n\n"
+				, counter, m_half_open.size(), m_half_open.num_connecting(), m_half_open.next_timeout()
+				, m_half_open.max_timeout());
+#if defined TORRENT_VERBOSE_LOGGING
+			(*m_logger) << time_now_string() << ": " << buffer << "\n";
+#endif			
+		}
+		async_dec_threads();
+#endif
+
+		if (m_thread) m_thread->join();
+		boost::system::error_code ignoreError;
+		stopIoTimer.cancel(ignoreError);
 
 		TORRENT_ASSERT(m_torrents.empty());
 		TORRENT_ASSERT(m_connections.empty());
@@ -6126,6 +6170,9 @@ retry:
 		}
 #endif
 
+#if defined TORRENT_VERBOSE_LOGGING
+		(*m_logger) << time_now_string() << ": session_impl::~session_impl end."  << "\n";
+#endif
 	}
 
 #ifndef TORRENT_NO_DEPRECATE

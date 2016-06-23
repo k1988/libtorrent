@@ -71,7 +71,9 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/socket.hpp"
 #include "libtorrent/aux_/session_impl.hpp"
 #include "libtorrent/aux_/session_call.hpp"
+#ifndef TORRENT_DISABLE_DHT
 #include "libtorrent/kademlia/dht_tracker.hpp"
+#endif
 #include "libtorrent/natpmp.hpp"
 #include "libtorrent/upnp.hpp"
 #include "libtorrent/magnet_uri.hpp"

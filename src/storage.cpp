@@ -543,6 +543,7 @@ namespace libtorrent
 
 			// ignore pad files
 			if (files().pad_file_at(file_index)) continue;
+			bool not_exist_file = false;
 
 			if (m_stat_cache.get_filesize(file_index) == stat_cache::not_in_cache)
 			{
@@ -555,6 +556,10 @@ namespace libtorrent
 					ec.file = file_index;
 					ec.operation = storage_error::stat;
 					break;
+				}
+				else if (ec)
+				{
+					not_exist_file = true;
 				}
 				m_stat_cache.set_cache(file_index, s.file_size, s.mtime);
 			}
@@ -589,6 +594,12 @@ namespace libtorrent
 				f->set_size(size, ec.ec);
 				if (ec)
 				{
+					// 设置大小失败后，如果原文件不存在或者大小是0，则删除文件
+					if (not_exist_file || m_stat_cache.get_filesize(file_index) == 0)
+					{
+						f->close();
+						delete_one_file(file_path);
+					}
 					ec.file = file_index;
 					ec.operation = storage_error::fallocate;
 					break;

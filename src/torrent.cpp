@@ -83,7 +83,9 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/instantiate_connection.hpp"
 #include "libtorrent/assert.hpp"
 #include "libtorrent/broadcast_socket.hpp"
+#ifndef TORRENT_DISABLE_DHT
 #include "libtorrent/kademlia/dht_tracker.hpp"
+#endif
 #include "libtorrent/peer_info.hpp"
 #include "libtorrent/http_connection.hpp"
 #include "libtorrent/random.hpp"
@@ -192,6 +194,7 @@ namespace libtorrent
 		, sha1_hash const& info_hash)
 		: torrent_hot_members(ses, p, block_size)
 		, m_total_uploaded(0)
+		, m_total_web_downloaded(0)
 		, m_total_downloaded(0)
 		, m_tracker_timer(ses.get_io_service())
 		, m_inactivity_timer(ses.get_io_service())
@@ -204,6 +207,7 @@ namespace libtorrent
 		, m_storage_constructor(p.storage)
 		, m_added_time(time(0))
 		, m_completed_time(0)
+		, m_first_completed_time(0)
 		, m_last_seen_complete(0)
 		, m_swarm_last_seen_complete(0)
 		, m_info_hash(info_hash)
@@ -261,6 +265,11 @@ namespace libtorrent
 		, m_incomplete(0xffffff)
 		, m_announce_to_dht((p.flags & add_torrent_params::flag_paused) == 0)
 		, m_in_state_updates(false)
+		, m_pure_bt_speed(200 * 1024)
+		, m_check_speed_interval(120)
+		, m_check_speed_ticks(120)
+		, m_seed_speed_policy(0)
+		, m_url_torrent_speed_mode(url_torrent_limit_speed)
 		, m_is_active_download(false)
 		, m_is_active_finished(false)
 		, m_ssl_torrent(false)
@@ -1962,6 +1971,15 @@ namespace libtorrent
 
 		if (m_seed_mode)
 		{
+			if (settings().disable_seed_download)
+			{
+				set_state(torrent_status::checking_resume_data);
+				m_storage->async_check_fastresume(&m_resume_entry
+					, boost::bind(&torrent::on_resume_data_checked
+					, shared_from_this(), _1, _2));
+				return;
+			}
+
 			m_have_all = true;
 			m_ses.get_io_service().post(boost::bind(&torrent::files_checked, shared_from_this()));
 			m_resume_data.reset();
@@ -3123,6 +3141,8 @@ namespace libtorrent
 		req.info_hash = m_torrent_file->info_hash();
 		req.pid = m_ses.get_peer_id();
 		req.downloaded = m_stat.total_payload_download() - m_total_failed_bytes;
+		req.downloadRate = m_stat.download_payload_rate();
+		req.uploadRate   = m_stat.upload_payload_rate();		
 		req.uploaded = m_stat.total_payload_upload();
 		req.corrupt = m_total_failed_bytes;
 		req.left = bytes_left();
@@ -3193,6 +3213,17 @@ namespace libtorrent
 
 			if (ae.tier > tier && sent_announce
 				&& !settings().get_bool(settings_pack::announce_to_all_tiers)) break;
+
+			// add by terry,如果本tier已经有一个tracker正在工作中
+			// 或者是已经发送过请求，就不再次发送
+			if (sent_announce
+				&& tier == ae.tier
+				&& !settings().announce_to_all_trackers
+				&& !settings().announce_to_all_tiers)
+			{
+				break;
+			}
+
 			if (ae.is_working()) { tier = ae.tier; sent_announce = false; }
 			if (!ae.can_announce(now, is_seed()))
 			{
@@ -3417,6 +3448,9 @@ namespace libtorrent
 		tracker_request const& r
 		, address const& tracker_ip // this is the IP we connected to
 		, std::list<address> const& tracker_ips // these are all the IPs it resolved to
+		, const std::string& trackerid
+		, int pure_bt_speed /*= 200*/
+		, int seed_speed_policy /*= 0*/
 		, struct tracker_response const& resp)
 	{
 		TORRENT_ASSERT(is_single_thread());
@@ -3452,6 +3486,20 @@ namespace libtorrent
 			ae->fails = 0;
 			ae->next_announce = now + seconds(interval);
 			ae->min_announce = now + seconds(resp.min_interval);
+
+			if (r.event == tracker_request::started && peer_list.size() < r.num_want)
+			{
+				//返回peer小于申请的数量，就更改访问tracker的频率(为min_interval和10分之1的Interval的最小值）
+				double ratio = peer_list.size() * 1.0 / r.num_want;
+				ratio = std::max(ratio, 0.1);
+				int new_interval = interval * ratio;
+				if (new_interval < min_interval)
+				{
+					new_interval = min_interval;
+				}
+				ae->next_announce = now + seconds(new_interval);
+			}
+
 			int tracker_index = ae - &m_trackers[0];
 			m_last_working_tracker = prioritize_tracker(tracker_index);
 
@@ -3469,6 +3517,14 @@ namespace libtorrent
 
 		if (resp.complete >= 0 && resp.incomplete >= 0)
 			m_last_scrape = m_ses.session_time();
+		if (pure_bt_speed > 0)
+		{
+			m_pure_bt_speed = pure_bt_speed * 1024;
+		}
+		if (seed_speed_policy >= 0)
+		{
+			m_seed_speed_policy = seed_speed_policy;
+		}
 
 #ifndef TORRENT_DISABLE_LOGGING
 		std::string resolved_to;
@@ -6242,6 +6298,10 @@ namespace libtorrent
 			|| m_ses.num_connections() >= settings().get_int(settings_pack::connections_limit))
 			return;
 
+#if defined TORRENT_VERBOSE_LOGGING || defined TORRENT_LOGGING
+		debug_log("resolving web seed: %s", web->url.c_str());
+#endif
+
 		std::string protocol;
 		std::string auth;
 		std::string hostname;
@@ -6864,6 +6924,7 @@ namespace libtorrent
 	{
 		m_total_uploaded = rd.dict_find_int_value("total_uploaded");
 		m_total_downloaded = rd.dict_find_int_value("total_downloaded");
+		m_total_web_downloaded = rd.dict_find_int_value("total_web_downloaded");
 		m_active_time = rd.dict_find_int_value("active_time");
 		m_finished_time = rd.dict_find_int_value("finished_time");
 		m_seeding_time = rd.dict_find_int_value("seeding_time");
@@ -6986,6 +7047,12 @@ namespace libtorrent
 		m_completed_time = rd.dict_find_int_value("completed_time", m_completed_time);
 		if (m_completed_time != 0 && m_completed_time < m_added_time)
 			m_completed_time = m_added_time;
+
+		m_first_completed_time = rd.dict_find_int_value("first_completed_time", m_first_completed_time);
+		if (m_first_completed_time !=0 && m_first_completed_time < m_added_time)
+		{
+			m_first_completed_time = m_added_time;
+		}
 
 		// load file priorities except if the add_torrent_param file was set to
 		// override resume data
@@ -7165,6 +7232,7 @@ namespace libtorrent
 
 		ret["total_uploaded"] = m_total_uploaded;
 		ret["total_downloaded"] = m_total_downloaded;
+		ret["total_web_downloaded"] = m_total_web_downloaded;
 
 		ret["active_time"] = active_time();
 		ret["finished_time"] = finished_time();
@@ -7182,6 +7250,7 @@ namespace libtorrent
 
 		ret["added_time"] = m_added_time;
 		ret["completed_time"] = m_completed_time;
+		ret["first_completed_time"] = m_first_completed_time;
 
 		ret["save_path"] = m_save_path;
 
@@ -8506,7 +8575,10 @@ namespace libtorrent
 
 		if (m_completed_time == 0)
 			m_completed_time = time(0);
-
+     	if (m_first_completed_time == 0)
+		{
+			m_first_completed_time = time(0);
+		}
 		// disconnect all seeds
 		if (settings().get_bool(settings_pack::close_redundant_connections))
 		{
@@ -8699,9 +8771,20 @@ namespace libtorrent
 		if (m_ses.alerts().should_post<torrent_checked_alert>())
 		{
 			m_ses.alerts().emplace_alert<torrent_checked_alert>(
-				get_handle());
+				get_handle(), is_finished());
 		}
 
+		if (!is_finished())
+		{
+			m_first_completed_time = 0;
+
+			if (settings().disable_seed_download && m_seed_mode)
+			{
+				set_upload_mode(true);
+				return;
+			}
+		}
+		
 		// calling pause will also trigger the auto managed
 		// recalculation
 		// if we just got here by downloading the metadata,
@@ -9694,6 +9777,10 @@ namespace libtorrent
 	void torrent::flush_cache()
 	{
 		TORRENT_ASSERT(is_single_thread());
+		if (m_ses.is_aborted()) return;
+
+		if (m_abort) return;
+
 
 		// storage may be NULL during shutdown
 		if (!m_storage)
@@ -10156,6 +10243,7 @@ namespace libtorrent
 		m_total_failed_bytes = 0;
 		m_total_redundant_bytes = 0;
 		m_stat.clear();
+        m_webStat.clear();
 
 		update_want_tick();
 
@@ -10257,6 +10345,8 @@ namespace libtorrent
 		{
 			// let the stats fade out to 0
 			m_stat.second_tick(tick_interval_ms);
+            m_webStat.second_tick(tick_interval_ms);
+
 			// if the rate is 0, there's no update because of network transfers
 			if (m_stat.low_pass_upload_rate() > 0 || m_stat.low_pass_download_rate() > 0)
 				state_updated();
@@ -10323,7 +10413,61 @@ namespace libtorrent
 
 		// ---- WEB SEEDS ----
 
+        bool forbid_new_webconnection = false;
+        bool disconnect_one_webconnection = false;
+
+		if (m_url_torrent_speed_mode == url_torrent_limit_speed)
+		{
+			//非web连接的总下载速度达到此限制就停止web连接，单位B/S
+			boost::uint32_t disable_web_connection_limit = m_pure_bt_speed;
+			if (m_stat.download_rate() > disable_web_connection_limit)
+			{
+				forbid_new_webconnection  = true;
+				//当非web的peer的下载总速度已经大于限制时，需要停止一个web连接
+				disconnect_one_webconnection =((m_stat.download_rate() - m_webStat.download_rate()) >= disable_web_connection_limit);
+			}
+		}
+
+		if (!forbid_new_webconnection)
 		maybe_connect_web_seeds();
+
+
+		if (m_check_speed_ticks > m_check_speed_interval)
+		{
+			m_check_speed_ticks = m_check_speed_interval;
+		}
+		if (--m_check_speed_ticks == 0)
+		{
+			m_check_speed_ticks = m_check_speed_interval;
+
+			if (m_connections.size() < m_max_connections
+				&& ((m_state != torrent_status::checking_files && m_state != torrent_status::checking_resume_data && m_state != torrent_status::queued_for_checking) || !valid_metadata())
+				&& !m_abort
+				&& m_state != torrent_status::seeding
+				&& m_state != torrent_status::finished)
+			{
+				//如果下载速度低于m_pure_bt_speed的一半并且剩余候选peer小于15个，就再次访问Tracker
+				boost::uint32_t min_speed = (m_pure_bt_speed / 2);
+				boost::uint32_t limit_speed = (boost::uint32_t)m_bandwidth_channel[peer_connection::download_channel].throttle();
+				if (limit_speed != 0)
+				{
+					min_speed = limit_speed / 2;
+				}
+				
+				if (m_stat.download_rate() < min_speed)
+				{
+					if (m_policy.num_connect_candidates() <= 15)
+					{
+#if defined TORRENT_VERBOSE_LOGGING || defined TORRENT_LOGGING || defined TORRENT_ERROR_LOGGING
+							(*m_ses.m_logger) << time_now_string() << torrent_file().name() << "force request tracker to get more peers.\n";
+#endif
+						force_tracker_request();
+					}
+				}
+			}
+		}
+
+		boost::shared_ptr<peer_connection> disconnect_peer;
 
 		m_swarm_last_seen_complete = m_last_seen_complete;
 		int idx = 0;
@@ -10338,6 +10482,25 @@ namespace libtorrent
 			// look for the peer that saw a seed most recently
 			m_swarm_last_seen_complete = (std::max)(p->last_seen_complete(), m_swarm_last_seen_complete);
 
+			if (!p->ignore_stats())
+            {
+				m_stat += p->statistics();
+
+                //update stats of web connections
+                if (p->type() == peer_connection::http_seed_connection
+                    || p->type() == peer_connection::url_seed_connection)
+                {
+                    m_webStat += p->statistics();
+
+                    //FIXME 需不需要使用挑选逻辑来挑选一个peer_connection
+                    if (disconnect_one_webconnection)
+                    {
+                        disconnect_one_webconnection = false;
+						disconnect_peer = p;
+                    }
+                }
+            }
+
 			// updates the peer connection's ul/dl bandwidth
 			// resource requests
 			TORRENT_TRY {
@@ -10351,6 +10514,10 @@ namespace libtorrent
 				p->peer_log(peer_log_alert::info, "ERROR", "%s", e.what());
 #endif
 				p->disconnect(errors::no_error, op_bittorrent, 1);
+				if (p == disconnect_peer)
+				{
+					disconnect_peer = NULL;
+				}
 			}
 
 			if (p->is_disconnecting())
@@ -10359,6 +10526,16 @@ namespace libtorrent
 				--idx;
 			}
 		}
+
+		if (disconnect_peer && !p->is_disconnecting())
+		{
+#if defined TORRENT_VERBOSE_LOGGING || defined TORRENT_ERROR_LOGGING
+			(*m_ses.m_logger) << time_now_string() << torrent_file().name() << "disconnect one web connection when bt speed is enough \n";
+			disconnect_peer->peer_log("*** kuai8 %s", "disconnect one web connection when bt speed is enough");
+#endif
+			disconnect_peer->disconnect(errors::no_error);
+		}
+
 		if (m_ses.alerts().should_post<stats_alert>())
 			m_ses.alerts().emplace_alert<stats_alert>(get_handle(), tick_interval_ms, m_stat);
 
@@ -10369,6 +10546,9 @@ namespace libtorrent
 		// these counters are saved in the resume data, since they updated
 		// we need to save the resume data too
 		m_need_save_resume_data = true;
+
+		m_total_web_downloaded += m_webStat.last_payload_downloaded();
+		m_webStat.second_tick(tick_interval_ms);
 
 		// if the rate is 0, there's no update because of network transfers
 		if (m_stat.low_pass_upload_rate() > 0 || m_stat.low_pass_download_rate() > 0)
@@ -10667,6 +10847,7 @@ namespace libtorrent
 			--pieces[i->piece].first;
 		}
 
+		//按可用端数大小重排序pieces
 		std::random_shuffle(pieces.begin(), pieces.end(), randint);
 		std::stable_sort(pieces.begin(), pieces.end()
 			, boost::bind(&std::pair<int, int>::first, _1) <
@@ -10678,6 +10859,7 @@ namespace libtorrent
 			avail_vec.push_back(pieces[i].second);
 		}
 
+		//调用cache
 		if (!avail_vec.empty())
 		{
 			// the number of pieces to cache for this torrent is proportional
@@ -10909,6 +11091,21 @@ namespace libtorrent
 		time_point now = aux::time_now();
 
 		// loop until every block has been requested from this piece (i->piece)
+    // add by terry, 为了统计http下载通道的下载率
+	void torrent::add_stats( stat const& s, peer_connection* c )
+	{
+		TORRENT_ASSERT(m_ses.is_network_thread());
+		// these stats are propagated to the session
+		// stats the next time second_tick is called
+		m_stat += s;
+
+		//update stats of web connections
+		if (c->type() == peer_connection::http_seed_connection
+			|| c->type() == peer_connection::url_seed_connection)
+		{
+			m_webStat += c->statistics();
+		}
+	}
 		do
 		{
 			// if this peer's download time exceeds 2 seconds, we're done.
@@ -11986,6 +12183,7 @@ namespace libtorrent
 #endif
 		st->seed_mode = m_seed_mode;
 		st->moving_storage = m_moving_storage;
+		st->seed_speed_policy = m_seed_speed_policy;
 
 		st->announcing_to_trackers = m_announce_to_trackers;
 		st->announcing_to_lsd = m_announce_to_lsd;
@@ -11994,6 +12192,7 @@ namespace libtorrent
 
 		st->added_time = m_added_time;
 		st->completed_time = m_completed_time;
+		st->first_completed_time = m_first_completed_time;
 
 		st->last_scrape = m_last_scrape == (std::numeric_limits<boost::int16_t>::min)() ? -1
 			: clamped_subtract(m_ses.session_time(), m_last_scrape);
@@ -12022,6 +12221,8 @@ namespace libtorrent
 
 		st->all_time_upload = m_total_uploaded;
 		st->all_time_download = m_total_downloaded;
+		st->all_time_web_download = m_total_web_downloaded;
+		st->splitFiles = m_torrent_file->m_splitFiles;
 
 		// activity time
 		st->finished_time = finished_time();
@@ -12056,6 +12257,9 @@ namespace libtorrent
 			+ m_stat.total_protocol_download();
 		st->total_upload = m_stat.total_payload_upload()
 			+ m_stat.total_protocol_upload();
+
+		st->total_web_playload_download = m_webStat.total_payload_download();
+		st->total_web_download = m_webStat.total_payload_download() + m_webStat.total_protocol_download();
 
 		// failed bytes
 		st->total_failed_bytes = m_total_failed_bytes;
@@ -12293,6 +12497,11 @@ namespace libtorrent
 		update_tracker_timer(aux::time_now());
 	}
 
+	void torrent::set_url_torrent_speed_mode(int mode)
+	{
+		m_url_torrent_speed_mode = mode;
+	}
+
 #ifndef TORRENT_DISABLE_LOGGING
 	TORRENT_FORMAT(2,3)
 	void torrent::debug_log(char const* fmt, ...) const
@@ -12311,4 +12520,13 @@ namespace libtorrent
 	}
 #endif
 
+	bool torrent::is_finished() const
+	{
+		if (is_seed() && !settings().disable_seed_download) 
+		{
+			return true;
+		}		
+		return valid_metadata() && (!m_picker || m_torrent_file->num_pieces()
+			- m_picker->num_have() - m_picker->num_filtered() == 0);
+	}
 }

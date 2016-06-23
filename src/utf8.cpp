@@ -31,7 +31,11 @@ POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include "libtorrent/config.hpp"
+#include "libtorrent/escape_string.hpp"
 
+#ifdef TORRENT_WINDOWS
+#include <windows.h>
+#endif // _DEBUG
 // on windows we need these functions for
 // convert_to_native and convert_from_native
 #if TORRENT_USE_WSTRING || defined TORRENT_WINDOWS
@@ -196,6 +200,17 @@ namespace libtorrent
 		wchar_t const* src_start = wide.c_str();
 		return convert_from_wide<sizeof(wchar_t)>::convert(
 			&src_start, src_start + wide.size(), utf8);
+	}
+
+
+	std::string utf8_to_local(std::string const& s)
+	{
+		return convert_to_native(s);
+	}
+
+	std::string local_to_utf8(std::string const &s)
+	{
+		return convert_from_native(s);
 	}
 }
 
