@@ -737,29 +737,29 @@ namespace libtorrent
 			, p.max_connections
 			, p.upload_limit
 			, p.download_limit
-			, (p.flags == add_torrent_params::flag_seed_mode)
+			, (p.flags & add_torrent_params::flag_seed_mode)
 				? "seed-mode " : ""
-			, (p.flags == add_torrent_params::flag_override_resume_data)
+			, (p.flags & add_torrent_params::flag_override_resume_data)
 				? "override-resume-data " : ""
-			, (p.flags == add_torrent_params::flag_upload_mode)
+			, (p.flags & add_torrent_params::flag_upload_mode)
 				? "upload-mode " : ""
-			, (p.flags == add_torrent_params::flag_share_mode)
+			, (p.flags & add_torrent_params::flag_share_mode)
 				? "share-mode " : ""
-			, (p.flags == add_torrent_params::flag_apply_ip_filter)
+			, (p.flags & add_torrent_params::flag_apply_ip_filter)
 				? "apply-ip-filter " : ""
-			, (p.flags == add_torrent_params::flag_paused)
+			, (p.flags & add_torrent_params::flag_paused)
 				? "paused " : ""
-			, (p.flags == add_torrent_params::flag_auto_managed)
+			, (p.flags & add_torrent_params::flag_auto_managed)
 				? "auto-managed " : ""
-			, (p.flags == add_torrent_params::flag_merge_resume_trackers)
+			, (p.flags & add_torrent_params::flag_merge_resume_trackers)
 				? "merge-resume-trackers " : ""
-			, (p.flags == add_torrent_params::flag_update_subscribe)
+			, (p.flags & add_torrent_params::flag_update_subscribe)
 				? "update-subscribe " : ""
-			, (p.flags == add_torrent_params::flag_super_seeding)
+			, (p.flags & add_torrent_params::flag_super_seeding)
 				? "super-seeding " : ""
-			, (p.flags == add_torrent_params::flag_sequential_download)
+			, (p.flags & add_torrent_params::flag_sequential_download)
 				? "sequential-download " : ""
-			, (p.flags == add_torrent_params::flag_use_resume_save_path)
+			, (p.flags & add_torrent_params::flag_use_resume_save_path)
 				? "resume-save-path " : ""
 			, p.save_path.c_str()
 			);
@@ -1846,7 +1846,7 @@ namespace libtorrent
 #endif
 		}
 
-		m_block_size_shift = root2((std::min)(int(block_size()), m_torrent_file->piece_length()));
+		m_block_size_shift = root2((std::min)(block_size(), m_torrent_file->piece_length()));
 
 		if (m_torrent_file->num_pieces() > piece_picker::max_pieces)
 		{
@@ -2019,7 +2019,7 @@ namespace libtorrent
 			}
 			// ugly edge case where padfiles are not used they way they're
 			// supposed to be. i.e. added back-to back or at the end
-			if (int(pb.block_index) == blocks_per_piece) { pb.block_index = 0; ++pb.piece_index; }
+			if (pb.block_index == blocks_per_piece) { pb.block_index = 0; ++pb.piece_index; }
 			if (pr.length > 0 && ((i+1 != fs.num_files() && fs.pad_file_at(i+1))
 				|| i + 1 == fs.num_files()))
 			{
@@ -2335,12 +2335,12 @@ namespace libtorrent
 
 		if (j->ret == piece_manager::fatal_disk_error)
 		{
+			m_resume_data.reset();
 			handle_disk_error(j);
 			auto_managed(false);
 			pause();
 			set_state(torrent_status::checking_files);
 			if (should_check_files()) start_checking();
-			m_resume_data.reset();
 			return;
 		}
 
@@ -2523,8 +2523,7 @@ namespace libtorrent
 				}
 
 				// parse unfinished pieces
-				int num_blocks_per_piece =
-					static_cast<int>(torrent_file().piece_length()) / block_size();
+				int num_blocks_per_piece = torrent_file().piece_length() / block_size();
 
 				if (bdecode_node unfinished_ent
 					= m_resume_data->node.dict_find_list("unfinished"))
@@ -3932,10 +3931,10 @@ namespace libtorrent
 		file_storage const& fs = m_torrent_file->files();
 		int piece_size = m_torrent_file->piece_size(p.piece_index);
 		int offset = p.block_index * block_size();
-		if (m_padding == 0) return (std::min)(piece_size - offset, int(block_size()));
+		if (m_padding == 0) return (std::min)(piece_size - offset, block_size());
 
 		std::vector<file_slice> files = fs.map_block(
-			p.piece_index, offset, (std::min)(piece_size - offset, int(block_size())));
+			p.piece_index, offset, (std::min)(piece_size - offset, block_size()));
 		int ret = 0;
 		for (std::vector<file_slice>::iterator i = files.begin()
 			, end(files.end()); i != end; ++i)
@@ -3943,7 +3942,7 @@ namespace libtorrent
 			if (fs.pad_file_at(i->file_index)) continue;
 			ret += i->size;
 		}
-		TORRENT_ASSERT(ret <= (std::min)(piece_size - offset, int(block_size())));
+		TORRENT_ASSERT(ret <= (std::min)(piece_size - offset, block_size()));
 		return ret;
 	}
 
@@ -7185,7 +7184,7 @@ namespace libtorrent
 			// some sanity checking. Maybe we shouldn't be in seed mode anymore
 			bdecode_node pieces = rd.dict_find("pieces");
 			if (pieces && pieces.type() == bdecode_node::string_t
-				&& int(pieces.string_length()) == m_torrent_file->num_pieces())
+				&& pieces.string_length() == m_torrent_file->num_pieces())
 			{
 				char const* pieces_str = pieces.string_ptr();
 				for (int i = 0, end(pieces.string_length()); i < end; ++i)
@@ -8704,7 +8703,7 @@ namespace libtorrent
 
 	// this will move the tracker with the given index
 	// to a prioritized position in the list (move it towards
-	// the begining) and return the new index to the tracker.
+	// the beginning) and return the new index to the tracker.
 	int torrent::prioritize_tracker(int index)
 	{
 		INVARIANT_CHECK;
@@ -8916,7 +8915,7 @@ namespace libtorrent
 		TORRENT_ASSERT(index >= 0);
 		TORRENT_ASSERT(index < m_torrent_file->num_files());
 
-		// stoage may be NULL during shutdown
+		// storage may be NULL during shutdown
 		if (!m_storage.get())
 		{
 			if (alerts().should_post<file_rename_failed_alert>())
@@ -10073,7 +10072,11 @@ namespace libtorrent
 	void torrent::do_resume()
 	{
 		TORRENT_ASSERT(is_single_thread());
-		if (is_paused()) return;
+		if (is_paused())
+		{
+			update_want_tick();
+			return;
+		}
 
 #ifndef TORRENT_DISABLE_EXTENSIONS
 		for (extension_list_t::iterator i = m_extensions.begin()
@@ -11772,6 +11775,7 @@ namespace libtorrent
 	{
 		if (!m_apply_ip_filter) return;
 		if (!m_peer_list) return;
+		if (!m_ip_filter) return;
 
 		torrent_state st = get_peer_list_state();
 		std::vector<address> banned;

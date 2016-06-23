@@ -265,7 +265,7 @@ namespace libtorrent
 			// add_torrent_params are also replaced. The default behavior is to
 			// have any web seeds in the resume data take precedence over whatever
 			// is passed in here as well as the .torrent file.
-			flag_merge_resume_http_seeds = 0x2000,
+			flag_merge_resume_http_seeds = 0x8000,
 
 			// the stop when ready flag. Setting this flag is equivalent to calling
 			// torrent_handle::stop_when_ready() immediately after the torrent is
@@ -306,7 +306,7 @@ namespace libtorrent
 		// also be stored in resume data. If you want the save path saved in
 		// the resume data to be used, you need to set the
 		// flag_use_resume_save_path flag.
-		//
+		// 
 		// .. note::
 		// 	On windows this path (and other paths) are interpreted as UNC
 		// 	paths. This means they must use backslashes as directory separators
@@ -377,6 +377,12 @@ namespace libtorrent
 
 		// flags controlling aspects of this torrent and how it's added. See
 		// flags_t for details.
+		// 
+		// .. note::
+		// 	The ``flags`` field is initialized with default flags by the
+		// 	constructor. In order to preserve default behavior when clearing or
+		// 	setting other flags, make sure to bitwise OR or in a flag or bitwise
+		// 	AND the inverse of a flag to clear it.
 		boost::uint64_t flags;
 
 		// set this to the info hash of the torrent to add in case the info-hash

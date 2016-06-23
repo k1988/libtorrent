@@ -580,10 +580,10 @@ namespace libtorrent
 			return;
 		}
 
-		int num_allowed_pieces = m_settings.get_int(settings_pack::allowed_fast_set_size);
+		int const num_allowed_pieces = m_settings.get_int(settings_pack::allowed_fast_set_size);
 		if (num_allowed_pieces == 0) return;
 
-		int num_pieces = t->torrent_file().num_pieces();
+		int const num_pieces = t->torrent_file().num_pieces();
 
 		if (num_allowed_pieces >= num_pieces)
 		{
@@ -596,9 +596,6 @@ namespace libtorrent
 				// that the peer already has
 				if (has_piece(i)) continue;
 
-#ifndef TORRENT_DISABLE_LOGGING
-				peer_log(peer_log_alert::outgoing_message, "ALLOWED_FAST", "%d", i);
-#endif
 				write_allow_fast(i);
 				TORRENT_ASSERT(std::find(m_accept_fast.begin()
 					, m_accept_fast.end(), i)
@@ -631,18 +628,26 @@ namespace libtorrent
 		x.append(t->torrent_file().info_hash().data(), 20);
 
 		sha1_hash hash = hasher(x.c_str(), x.size()).final();
+		int attempts = 0;
+		int loops = 0;
 		for (;;)
 		{
-			char* p = hash.data();
-			for (int i = 0; i < 5; ++i)
+			char const* p = hash.data();
+			for (int i = 0; i < hash.size / sizeof(boost::uint32_t); ++i)
 			{
-				int piece = detail::read_uint32(p) % num_pieces;
+				++loops;
+				int const piece = detail::read_uint32(p) % num_pieces;
 				if (std::find(m_accept_fast.begin(), m_accept_fast.end(), piece)
-					== m_accept_fast.end())
+					!= m_accept_fast.end())
 				{
-#ifndef TORRENT_DISABLE_LOGGING
-					peer_log(peer_log_alert::outgoing_message, "ALLOWED_FAST", "%d", piece);
-#endif
+					// this is our safety-net to make sure this loop terminates, even
+					// under the worst conditions
+					if (++loops > 500) return;
+					continue;
+				}
+
+				if (!has_piece(piece))
+				{
 					write_allow_fast(piece);
 					if (m_accept_fast.empty())
 					{
@@ -651,9 +656,8 @@ namespace libtorrent
 					}
 					m_accept_fast.push_back(piece);
 					m_accept_fast_piece_cnt.push_back(0);
-					if (int(m_accept_fast.size()) >= num_allowed_pieces
-						|| int(m_accept_fast.size()) == num_pieces) return;
 				}
+				if (++attempts >= num_allowed_pieces) return;
 			}
 			hash = hasher(hash.data(), 20).final();
 		}
@@ -1576,10 +1580,14 @@ namespace libtorrent
 				return;
 		}
 
+		// the piece picker will prioritize the pieces from the beginning to end.
+		// the later the suggestion is received, the higher priority we should
+		// ascribe to it, so we need to insert suggestions at the front of the
+		// queue.
 		if (int(m_suggested_pieces.size()) > m_settings.get_int(settings_pack::max_suggest_pieces))
-			m_suggested_pieces.erase(m_suggested_pieces.begin());
+			m_suggested_pieces.resize(m_settings.get_int(settings_pack::max_suggest_pieces) - 1);
 
-		m_suggested_pieces.push_back(index);
+		m_suggested_pieces.insert(m_suggested_pieces.begin(), index);
 
 #ifndef TORRENT_DISABLE_LOGGING
 		peer_log(peer_log_alert::info, "SUGGEST_PIECE", "piece: %d added to set: %d"
@@ -3039,10 +3047,11 @@ namespace libtorrent
 		TORRENT_ASSERT(p.start == j->d.io.offset);
 		TORRENT_ASSERT(picker.num_peers(block_finished) == 0);
 
-		if (j->ret == -1 && j->error.ec == boost::system::errc::operation_canceled)
+		if (j->ret == -1
+			&& j->error.ec == boost::system::errc::operation_canceled)
 		{
-			TORRENT_ASSERT(false); // how do we get here?
 			picker.mark_as_canceled(block_finished, peer_info_struct());
+			TORRENT_ASSERT(false); // how do we get here?
 			return;
 		}
 //		fprintf(stderr, "peer_connection mark_as_finished peer: %p piece: %d block: %d\n"

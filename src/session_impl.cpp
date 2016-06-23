@@ -1494,7 +1494,7 @@ namespace aux {
 
 		int loaded_limit = m_settings.get_int(settings_pack::active_loaded_limit);
 
-		// 0 means unlimited, never evict enything
+		// 0 means unlimited, never evict anything
 		if (loaded_limit == 0) return;
 
 		if (m_torrent_lru.size() > loaded_limit)
@@ -1518,7 +1518,7 @@ namespace aux {
 
 		int loaded_limit = m_settings.get_int(settings_pack::active_loaded_limit);
 
-		// 0 means unlimited, never evict enything
+		// 0 means unlimited, never evict anything
 		if (loaded_limit == 0) return;
 
 		// if the torrent we're ignoring (i.e. making room for), allow
@@ -1559,6 +1559,7 @@ namespace aux {
 		// we wouldn't be loading the torrent if it was already
 		// in the LRU (and loaded)
 		TORRENT_ASSERT(t->next == NULL && t->prev == NULL && m_torrent_lru.front() != t);
+		TORRENT_ASSERT(m_user_load_torrent);
 
 		// now, load t into RAM
 		std::vector<char> buffer;
@@ -2555,8 +2556,12 @@ retry:
 				{
 					// now, disconnect a random peer
 					torrent_map::iterator i = std::max_element(m_torrents.begin()
-						, m_torrents.end(), boost::bind(&torrent::num_peers
-							, boost::bind(&torrent_map::value_type::second, _1)));
+						, m_torrents.end()
+							, boost::bind(&torrent::num_peers
+								, boost::bind(&torrent_map::value_type::second, _1))
+							< boost::bind(&torrent::num_peers
+								, boost::bind(&torrent_map::value_type::second, _2))
+							);
 
 					if (m_alerts.should_post<performance_alert>())
 						m_alerts.emplace_alert<performance_alert>(
@@ -4800,6 +4805,19 @@ retry:
 		// params.info_hash should have been initialized by add_torrent_impl()
 		TORRENT_ASSERT(params.info_hash != sha1_hash(0));
 
+		// --- PEERS --- (delete when merged to master)
+		std::vector<tcp::endpoint> peers;
+		parse_magnet_uri_peers(p.url, peers);
+
+		for (std::vector<tcp::endpoint>::const_iterator i = peers.begin()
+			, end(peers.end()); i != end; ++i)
+		{
+			torrent_ptr->add_peer(*i , peer_info::resume_data);
+		}
+
+		if (!peers.empty())
+			torrent_ptr->update_want_peers();
+
 		if (m_alerts.should_post<torrent_added_alert>())
 			m_alerts.emplace_alert<torrent_added_alert>(handle);
 
@@ -6280,7 +6298,7 @@ retry:
 
 	void session_impl::update_user_agent()
 	{
-		// replace all occurances of '\n' with ' '.
+		// replace all occurrences of '\n' with ' '.
 		std::string agent = m_settings.get_str(settings_pack::user_agent);
 		std::string::iterator i = agent.begin();
 		while ((i = std::find(i, agent.end(), '\n'))
@@ -6435,7 +6453,7 @@ retry:
 
 	void session_impl::on_trigger_auto_manage()
 	{
-		assert(m_pending_auto_manage);
+		TORRENT_ASSERT(m_pending_auto_manage);
 		if (!m_need_auto_manage || m_abort)
 		{
 			m_pending_auto_manage = false;

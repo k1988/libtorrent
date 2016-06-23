@@ -74,7 +74,7 @@ namespace libtorrent
 	public:
 
 		// this is the constructor where the we are the active part.
-		// The peer_conenction should handshake and verify that the
+		// The peer_connection should handshake and verify that the
 		// other end has the correct id
 		bt_peer_connection(peer_connection_args const& pack
 			, peer_id const& pid);
@@ -223,7 +223,7 @@ namespace libtorrent
 		void write_dont_have(int index) TORRENT_OVERRIDE;
 		void write_piece(peer_request const& r, disk_buffer_holder& buffer) TORRENT_OVERRIDE;
 		void write_keepalive() TORRENT_OVERRIDE;
-		void write_handshake(bool plain_handshake = false);
+		void write_handshake();
 #ifndef TORRENT_DISABLE_EXTENSIONS
 		void write_extensions();
 		void write_upload_only();
@@ -242,7 +242,7 @@ namespace libtorrent
 		void write_reject_request(peer_request const&) TORRENT_OVERRIDE;
 		void write_allow_fast(int piece) TORRENT_OVERRIDE;
 		void write_suggest(int piece) TORRENT_OVERRIDE;
-		
+
 		void on_connected() TORRENT_OVERRIDE;
 		void on_metadata() TORRENT_OVERRIDE;
 
@@ -355,6 +355,10 @@ private:
 		// true if we're done sending the bittorrent handshake,
 		// and can send bittorrent messages
 		bool m_sent_handshake:1;
+
+		// set to true once we send the allowed-fast messages. This is
+		// only done once per connection
+		bool m_sent_allowed_fast:1;
 
 #if !defined(TORRENT_DISABLE_ENCRYPTION) && !defined(TORRENT_DISABLE_EXTENSIONS)
 		// this is set to true after the encryption method has been

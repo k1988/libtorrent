@@ -99,7 +99,7 @@ std::string demangle(char const* name)
 	free(unmangled);
 	return ret;
 }
-#elif defined WIN32
+#elif defined _WIN32
 
 #include "windows.h"
 #include "dbghelp.h"
@@ -142,7 +142,7 @@ TORRENT_EXPORT void print_backtrace(char* out, int len, int max_depth)
 }
 
 // visual studio 9 and up appears to support this
-#elif defined WIN32 && _MSC_VER >= 1500
+#elif defined _WIN32 && _MSC_VER >= 1500
 
 #include "windows.h"
 #include "libtorrent/utf8.hpp"
@@ -245,9 +245,13 @@ TORRENT_EXPORT void assert_print(char const* fmt, ...)
 #endif
 }
 
-#ifndef TORRENT_PRODUCTION_ASSERTS
-TORRENT_NO_RETURN
+// we deliberately don't want asserts to be marked as no-return, since that
+// would trigger warnings in debug builds of any code coming after the assert
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-noreturn"
 #endif
+
 TORRENT_EXPORT void assert_fail(char const* expr, int line
 	, char const* file, char const* function, char const* value, int kind)
 {
@@ -299,6 +303,10 @@ TORRENT_EXPORT void assert_fail(char const* expr, int line
 	abort();
 #endif
 }
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 #elif !TORRENT_USE_ASSERTS
 
