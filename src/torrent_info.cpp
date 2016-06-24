@@ -638,8 +638,10 @@ namespace libtorrent
 		return true;
 	}
 
+	} // anonymous namespace
+
 	int load_file(std::string const& filename, std::vector<char>& v
-		, error_code& ec, int limit = 8000000)
+		, error_code& ec, int limit /*= 8000000*/)
 	{
 		ec.clear();
 		file f;
@@ -659,8 +661,6 @@ namespace libtorrent
 		if (ec) return -3;
 		return 0;
 	}
-
-	} // anonymous namespace
 
 	web_seed_entry::web_seed_entry(std::string const& url_, type_t type_
 		, std::string const& auth_

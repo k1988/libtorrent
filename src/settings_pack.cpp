@@ -127,6 +127,7 @@ namespace libtorrent
 
 	str_setting_entry_t str_settings[settings_pack::num_string_settings] =
 	{
+		SET(soft_version, "", 0),//modify by terry
 		SET(user_agent, "libtorrent/" LIBTORRENT_VERSION, &session_impl::update_user_agent),
 		SET(announce_ip, 0, 0),
 		SET(mmap_cache, 0, 0),
@@ -194,6 +195,7 @@ namespace libtorrent
 		SET(lock_files, false, 0),
 		SET(contiguous_recv_buffer, true, 0),
 		SET(ban_web_seeds, true, 0),
+		SET(disable_seed_download, false, 0),
 		SET_NOPREV(allow_partial_disk_writes, true, 0),
 		SET(force_proxy, false, &session_impl::update_force_proxy),
 		SET(support_share_mode, true, 0),
