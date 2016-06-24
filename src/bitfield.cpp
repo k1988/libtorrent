@@ -59,7 +59,7 @@ namespace libtorrent
 	{
 		int ret = 0;
 		const int words = num_words();
-#if TORRENT_HAS_SSE
+#if (TORRENT_HAS_SSE && defined _MSC_VER && _MSC_VER >= 1600)
 		if (aux::mmx_support)
 		{
 			for (int i = 0; i < words; ++i)
