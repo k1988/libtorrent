@@ -1971,14 +1971,14 @@ namespace libtorrent
 
 		if (m_seed_mode)
 		{
-			if (settings().disable_seed_download)
+			/*if (settings().get_bool(settings_pack::disable_seed_download))
 			{
 				set_state(torrent_status::checking_resume_data);
-				m_storage->async_check_fastresume(&m_resume_entry
+				m_ses.disk_thread().async_check_fastresume(&m_resume_entry
 					, boost::bind(&torrent::on_resume_data_checked
 					, shared_from_this(), _1, _2));
 				return;
-			}
+			}*/
 
 			m_have_all = true;
 			m_ses.get_io_service().post(boost::bind(&torrent::files_checked, shared_from_this()));
@@ -3210,18 +3210,12 @@ namespace libtorrent
 			// if trackerid is not specified for tracker use default one, probably set explicitly
 			req.trackerid = ae.trackerid.empty() ? m_trackerid : ae.trackerid;
 
-			if (ae.tier > tier && sent_announce
-				&& !settings().get_bool(settings_pack::announce_to_all_tiers)) break;
-
 			// add by terry,如果本tier已经有一个tracker正在工作中
 			// 或者是已经发送过请求，就不再次发送
-			if (sent_announce
-				&& tier == ae.tier
-				&& !settings().announce_to_all_trackers
-				&& !settings().announce_to_all_tiers)
-			{
+			if (ae.tier > tier && sent_announce
+				&& !settings().get_bool(settings_pack::announce_to_all_tiers)
+				&& !settings().get_bool(settings_pack::announce_to_all_trackers)) 
 				break;
-			}
 
 			if (ae.is_working()) { tier = ae.tier; sent_announce = false; }
 			if (!ae.can_announce(now, is_seed()))
@@ -3446,10 +3440,7 @@ namespace libtorrent
 	void torrent::tracker_response(
 		tracker_request const& r
 		, address const& tracker_ip // this is the IP we connected to
-		, std::list<address> const& tracker_ips // these are all the IPs it resolved to
-		, const std::string& trackerid
-		, int pure_bt_speed /*= 200*/
-		, int seed_speed_policy /*= 0*/
+		, std::list<address> const& ip_list // these are all the IPs it resolved to
 		, struct tracker_response const& resp)
 	{
 		TORRENT_ASSERT(is_single_thread());
@@ -3486,15 +3477,15 @@ namespace libtorrent
 			ae->next_announce = now + seconds(interval);
 			ae->min_announce = now + seconds(resp.min_interval);
 
-			if (r.event == tracker_request::started && peer_list.size() < r.num_want)
+			if (r.event == tracker_request::started && resp.peers.size() < r.num_want)
 			{
 				//返回peer小于申请的数量，就更改访问tracker的频率(为min_interval和10分之1的Interval的最小值）
-				double ratio = peer_list.size() * 1.0 / r.num_want;
+				double ratio = resp.peers.size() * 1.0 / r.num_want;
 				ratio = std::max(ratio, 0.1);
 				int new_interval = interval * ratio;
-				if (new_interval < min_interval)
+				if (new_interval < resp.min_interval)
 				{
-					new_interval = min_interval;
+					new_interval = resp.min_interval;
 				}
 				ae->next_announce = now + seconds(new_interval);
 			}
@@ -3516,19 +3507,19 @@ namespace libtorrent
 
 		if (resp.complete >= 0 && resp.incomplete >= 0)
 			m_last_scrape = m_ses.session_time();
-		if (pure_bt_speed > 0)
+		if (resp.pure_bt_speed > 0)
 		{
-			m_pure_bt_speed = pure_bt_speed * 1024;
+			m_pure_bt_speed = resp.pure_bt_speed * 1024;
 		}
-		if (seed_speed_policy >= 0)
+		if (resp.seed_speed_policy >= 0)
 		{
-			m_seed_speed_policy = seed_speed_policy;
+			m_seed_speed_policy = resp.seed_speed_policy;
 		}
 
 #ifndef TORRENT_DISABLE_LOGGING
 		std::string resolved_to;
-		for (std::list<address>::const_iterator i = tracker_ips.begin()
-			, end(tracker_ips.end()); i != end; ++i)
+		for (std::list<address>::const_iterator i = ip_list.begin()
+			, end(ip_list.end()); i != end; ++i)
 		{
 			resolved_to += i->to_string();
 			resolved_to += ", ";
@@ -3663,9 +3654,9 @@ namespace libtorrent
 			&& r.bind_ip != m_ses.get_ipv4_interface().address()
 			&& r.bind_ip != m_ses.get_ipv6_interface().address())
 		{
-			std::list<address>::const_iterator i = std::find_if(tracker_ips.begin()
-				, tracker_ips.end(), boost::bind(&address::is_v4, _1) != tracker_ip.is_v4());
-			if (i != tracker_ips.end())
+			std::list<address>::const_iterator i = std::find_if(ip_list.begin()
+				, ip_list.end(), boost::bind(&address::is_v4, _1) != tracker_ip.is_v4());
+			if (i != ip_list.end())
 			{
 				// the tracker did resolve to a different type of address, so announce
 				// to that as well
@@ -8777,7 +8768,7 @@ namespace libtorrent
 		{
 			m_first_completed_time = 0;
 
-			if (settings().disable_seed_download && m_seed_mode)
+			if (settings().get_bool(settings_pack::disable_seed_download) && m_seed_mode)
 			{
 				set_upload_mode(true);
 				return;
@@ -8885,7 +8876,10 @@ namespace libtorrent
 
 	bool torrent::is_finished() const
 	{
-		if (is_seed()) return true;
+		if (is_seed() && !settings().get_bool(settings_pack::disable_seed_download)) 
+		{
+			return true;
+		}
 
 		// this is slightly different from m_picker->is_finished()
 		// because any piece that has *passed* is considered here,
@@ -10451,20 +10445,20 @@ namespace libtorrent
 			{
 				//如果下载速度低于m_pure_bt_speed的一半并且剩余候选peer小于15个，就再次访问Tracker
 				boost::uint32_t min_speed = (m_pure_bt_speed / 2);
-				boost::uint32_t limit_speed = (boost::uint32_t)m_bandwidth_channel[peer_connection::download_channel].throttle();
-				if (limit_speed != 0)
+				int limit_speed = limit_impl(peer_connection::download_channel);
+				if (limit_speed > 0)
 				{
 					min_speed = limit_speed / 2;
 				}
 				
 				if (m_stat.download_rate() < min_speed)
 				{
-					if (m_policy.num_connect_candidates() <= 15)
+					if (m_peer_list && m_peer_list->num_connect_candidates() <= 15)
 					{
 #if defined TORRENT_VERBOSE_LOGGING || defined TORRENT_LOGGING || defined TORRENT_ERROR_LOGGING
-							(*m_ses.m_logger) << time_now_string() << torrent_file().name() << "force request tracker to get more peers.\n";
+						(*m_ses.m_logger) << time_now_string() << torrent_file().name() << "force request tracker to get more peers.\n";
 #endif
-						force_tracker_request();
+						force_tracker_request(aux::time_now(), -1);
 					}
 				}
 			}
@@ -10519,7 +10513,7 @@ namespace libtorrent
 				p->disconnect(errors::no_error, op_bittorrent, 1);
 				if (p == disconnect_peer)
 				{
-					disconnect_peer = NULL;
+					disconnect_peer.reset();
 				}
 			}
 
@@ -10530,13 +10524,13 @@ namespace libtorrent
 			}
 		}
 
-		if (disconnect_peer && !p->is_disconnecting())
+		if (disconnect_peer && !disconnect_peer->is_disconnecting())
 		{
 #if defined TORRENT_VERBOSE_LOGGING || defined TORRENT_ERROR_LOGGING
 			(*m_ses.m_logger) << time_now_string() << torrent_file().name() << "disconnect one web connection when bt speed is enough \n";
 			disconnect_peer->peer_log("*** kuai8 %s", "disconnect one web connection when bt speed is enough");
 #endif
-			disconnect_peer->disconnect(errors::no_error);
+			disconnect_peer->disconnect(errors::no_error, op_bittorrent);
 		}
 
 		if (m_ses.alerts().should_post<stats_alert>())
@@ -11094,21 +11088,6 @@ namespace libtorrent
 		time_point now = aux::time_now();
 
 		// loop until every block has been requested from this piece (i->piece)
-    // add by terry, 为了统计http下载通道的下载率
-	void torrent::add_stats( stat const& s, peer_connection* c )
-	{
-		TORRENT_ASSERT(m_ses.is_network_thread());
-		// these stats are propagated to the session
-		// stats the next time second_tick is called
-		m_stat += s;
-
-		//update stats of web connections
-		if (c->type() == peer_connection::http_seed_connection
-			|| c->type() == peer_connection::url_seed_connection)
-		{
-			m_webStat += c->statistics();
-		}
-	}
 		do
 		{
 			// if this peer's download time exceeds 2 seconds, we're done.
@@ -12506,6 +12485,22 @@ namespace libtorrent
 		m_url_torrent_speed_mode = mode;
 	}
 
+	// add by terry, 为了统计http下载通道的下载率
+	void torrent::add_stats( stat const& s, peer_connection* c )
+	{
+		TORRENT_ASSERT(m_ses.is_network_thread());
+		// these stats are propagated to the session
+		// stats the next time second_tick is called
+		m_stat += s;
+
+		//update stats of web connections
+		if (c->type() == peer_connection::http_seed_connection
+			|| c->type() == peer_connection::url_seed_connection)
+		{
+			m_webStat += c->statistics();
+		}
+	}
+
 #ifndef TORRENT_DISABLE_LOGGING
 	TORRENT_FORMAT(2,3)
 	void torrent::debug_log(char const* fmt, ...) const
@@ -12523,14 +12518,4 @@ namespace libtorrent
 			const_cast<torrent*>(this)->get_handle(), buf);
 	}
 #endif
-
-	bool torrent::is_finished() const
-	{
-		if (is_seed() && !settings().disable_seed_download) 
-		{
-			return true;
-		}		
-		return valid_metadata() && (!m_picker || m_torrent_file->num_pieces()
-			- m_picker->num_have() - m_picker->num_filtered() == 0);
-	}
 }

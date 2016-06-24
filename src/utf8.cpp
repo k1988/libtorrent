@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include "libtorrent/config.hpp"
-#include "libtorrent/escape_string.hpp"
+#include "libtorrent/aux_/escape_string.hpp" // for convert_to_wstring
 
 #ifdef TORRENT_WINDOWS
 #include <windows.h>
@@ -219,4 +219,3 @@ namespace libtorrent
 #endif
 
 #endif
-

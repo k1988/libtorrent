@@ -378,14 +378,55 @@ void web_peer_connection::write_request(peer_request const& r)
 				continue;
 			}
 
-				if (false == info.m_splitFiles)
-				{
-					//不拆文件，则走原来的流程
+			if (!info.m_splitFiles)
+			{
+				//不拆文件，则走原来的流程
 				request += "GET ";
 				if (using_proxy)
 				{
 					// m_url is already a properly escaped URL
 					// with the correct slashes. Don't encode it again
+					request += m_url;
+					std::string path = info.orig_files().file_path(f.file_index);
+#ifdef TORRENT_WINDOWS
+					convert_path_to_posix(path);
+#endif
+					request += escape_path(path.c_str(), path.length());
+				}
+				else
+				{
+					// m_path is already a properly escaped URL
+					// with the correct slashes. Don't encode it again
+					request += m_path;
+
+					std::string path = info.orig_files().file_path(f.file_index);
+#ifdef TORRENT_WINDOWS
+					convert_path_to_posix(path);
+#endif
+					request += escape_path(path.c_str(), path.length());
+				}
+				request += " HTTP/1.1\r\n";
+				add_headers(request, m_settings, using_proxy);
+				request += "\r\nRange: bytes=";
+				request += to_string(f.offset).elems;
+				request += "-";
+				request += to_string(f.offset + f.size - 1).elems;
+				request += "\r\n\r\n";
+				m_first_request = false;
+
+#if 0
+				std::cerr << this << " SEND-REQUEST: f: " << f.file_index
+					<< " s: " << f.offset
+					<< " e: " << (f.offset + f.size - 1) << std::endl;
+#endif
+				TORRENT_ASSERT(f.file_index >= 0);
+			}
+			else
+			{
+				bool bFind = false;
+				request += "GET ";
+				if (using_proxy)
+				{
 					request += m_url;
 					std::string path = info.orig_files().file_path(info.orig_files().internal_at(f.file_index));
 #ifdef TORRENT_WINDOWS
@@ -395,110 +436,62 @@ void web_peer_connection::write_request(peer_request const& r)
 				}
 				else
 				{
-						std::string path = m_path;
-						path += info.orig_files().file_path(info.orig_files().internal_at(f.file_index));
-#ifdef TORRENT_WINDOWS
-						convert_path_to_posix(path);
-#endif
-						request += escape_path(path.c_str(), path.length());
+					std::string path = m_path;
+					std::string tmp = info.orig_files().file_path(info.orig_files().internal_at(f.file_index));
+					std::string s = tmp;
+
+					//如果末尾是.part0
+					size_t start = strlen(s.c_str());
+					const char* pPostfix     = ".gmz";
+					const char* pPostfixpart = ".part";
+
+					const char* p = strstr(s.c_str(), pPostfix);
+					while (NULL != p)
+					{
+						//先找最后一个.gmz
+						start = strlen(s.c_str()) - strlen(p) + strlen(pPostfix);
+						p = strstr(s.c_str() + start, pPostfix);
 					}
-					request += " HTTP/1.1\r\n";
-					add_headers(request, ps, using_proxy);
-					request += "\r\nRange: bytes=";
+					//后面如果是.part的话
+					if (strlen(s.c_str()) >= start + strlen(pPostfixpart))
+					{
+						size_t pos = strnicmp(s.c_str()+start, pPostfixpart, strlen(pPostfixpart));
+						if (0 == pos)
+						{
+							path = m_path;
+							//去掉末尾的"\"
+							path.erase(path.length() - 1);
+						}
+					}
+#ifdef TORRENT_WINDOWS
+					convert_path_to_posix(path);
+#endif
+					request += escape_path(path.c_str(), path.length());
+				}
+
+
+				request += " HTTP/1.1\r\n";
+				add_headers(request, m_settings, using_proxy);
+				request += "\r\nRange: bytes=";
+
+				if (true == info.is_multifile())
+				{
+					//如果torrent_info解析的时候有 files 字段
 					request += to_string(f.offset).elems;
 					request += "-";
 					request += to_string(f.offset + f.size - 1).elems;
-					request += "\r\n\r\n";
-					m_first_request = false;
-					TORRENT_ASSERT(f.file_index >= 0);
-					m_file_requests.push_back(f.file_index);
 				}
 				else
 				{
-					bool bFind = false;
-					request += "GET ";
-					if (using_proxy)
-					{
-						request += m_url;
-						std::string path = info.orig_files().file_path(info.orig_files().internal_at(f.file_index));
-#ifdef TORRENT_WINDOWS
-						convert_path_to_posix(path);
-#endif
-						request += escape_path(path.c_str(), path.length());
-					}
-					else
-					{
-						std::string path = m_path;
-						std::string tmp = info.orig_files().file_path(info.orig_files().internal_at(f.file_index));
-						std::string s = tmp;
-
-						//如果末尾是.part0
-						size_t start = strlen(s.c_str());
-						const char* pPostfix     = ".gmz";
-						const char* pPostfixpart = ".part";
-
-						const char* p = strstr(s.c_str(), pPostfix);
-						while (NULL != p)
-						{
-							//先找最后一个.gmz
-							start = strlen(s.c_str()) - strlen(p) + strlen(pPostfix);
-							p = strstr(s.c_str() + start, pPostfix);
-						}
-						//后面如果是.part的话
-						if (strlen(s.c_str()) >= start + strlen(pPostfixpart))
-						{
-							size_t pos = strnicmp(s.c_str()+start, pPostfixpart, strlen(pPostfixpart));
-							if (0 == pos)
-							{
-								path = m_path;
-								//去掉末尾的"\"
-								path.erase(path.length() - 1);
-							}
-						}
-#ifdef TORRENT_WINDOWS
-						convert_path_to_posix(path);
-#endif
-						request += escape_path(path.c_str(), path.length());
-					}					
-					request += " HTTP/1.1\r\n";
-					add_headers(request, ps, using_proxy);
-					request += "\r\nRange: bytes=";
-					if (true == info.m_multifile)
-					{
-						//如果torrent_info解析的时候有 files 字段
-						request += to_string(f.offset).elems;
-						request += "-";
-						request += to_string(f.offset + f.size - 1).elems;
-					}
-					else
-					{
-						//没有files字段
-						request += to_string(size_type(r.piece) * info.piece_length() + r.start).elems;
-						request += "-";
-						request += to_string(size_type(r.piece) * info.piece_length() + r.start + r.length - 1).elems;
-					}
-					request += "\r\n\r\n";
-					m_first_request = false;
-					TORRENT_ASSERT(f.file_index >= 0);
-					m_file_requests.push_back(f.file_index);
-					break;
+					//没有files字段
+					request += to_string(r.piece * info.piece_length() + r.start).elems;
+					request += "-";
+					request += to_string(r.piece * info.piece_length() + r.start + r.length - 1).elems;
 				}
-			}
-			request += " HTTP/1.1\r\n";
-			add_headers(request, m_settings, using_proxy);
-			request += "\r\nRange: bytes=";
-			request += to_string(f.offset).elems;
-			request += "-";
-			request += to_string(f.offset + f.size - 1).elems;
-			request += "\r\n\r\n";
-			m_first_request = false;
 
-#if 0
-			std::cerr << this << " SEND-REQUEST: f: " << f.file_index
-				<< " s: " << f.offset
-				<< " e: " << (f.offset + f.size - 1) << std::endl;
-#endif
-			TORRENT_ASSERT(f.file_index >= 0);
+				request += "\r\n\r\n";
+				m_first_request = false;
+			}
 
 			m_file_requests.push_back(file_req);
 		}

@@ -165,8 +165,8 @@ namespace libtorrent
 		// scrape_tracker() or force_reannounce()
 		bool triggered_manually;
 
-		size_type downloadRate;
-		size_type uploadRate;
+		boost::int64_t downloadRate;
+		boost::int64_t uploadRate;
 #ifdef TORRENT_USE_OPENSSL
 		boost::asio::ssl::context* ssl_ctx;
 #endif
@@ -181,6 +181,8 @@ namespace libtorrent
 			: interval(1800)
 			, min_interval(120)
 			, complete(-1)
+			, pure_bt_speed(200)
+			, seed_speed_policy(0)
 			, incomplete(-1)
 			, downloaders(-1)
 			, downloaded(-1)
@@ -225,6 +227,9 @@ namespace libtorrent
 
 		// the number of times the torrent has been downloaded
 		int downloaded;
+
+		int pure_bt_speed; /*= 200*/
+		int seed_speed_policy; /*= 0*/
 	};
 
 	struct TORRENT_EXTRA_EXPORT request_callback
@@ -241,15 +246,7 @@ namespace libtorrent
 			tracker_request const& req
 			, address const& tracker_ip
 			, std::list<address> const& ip_list
-			, std::vector<peer_entry>& peers
-			, int interval
-			, int min_interval
-			, int complete
-			, int incomplete
-			, address const& external_ip
-			, std::string const& trackerid
-			, struct tracker_response const& response
-			, int pure_bt_speed = 200, int seed_speed_policy = 0) = 0;
+			, struct tracker_response const& response) = 0;
 		virtual void tracker_request_error(
 			tracker_request const& req
 			, int response_code

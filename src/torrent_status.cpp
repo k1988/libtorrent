@@ -105,6 +105,11 @@ namespace libtorrent
 		, announcing_to_lsd(false)
 		, announcing_to_dht(false)
 		, stop_when_ready(false)
+		, total_web_download(0)
+		, total_web_playload_download(0)
+		, all_time_web_download(0)
+		, first_completed_time(0)
+		, seed_speed_policy(0)
 		, info_hash(0)
 	{}
 

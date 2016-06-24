@@ -397,7 +397,7 @@ namespace libtorrent
 	// torrent, in which case it's empty.
 	bool extract_single_file(bdecode_node const& dict, file_storage& files
 		, std::string const& root_dir, ptrdiff_t info_ptr_diff, bool top_level
-		, error_code& ec)
+		, error_code& ec, bool& splitFiles/* = false*/)
 	{
 		if (dict.type() != bdecode_node::dict_t) return false;
 		boost::int64_t file_size = dict.dict_find_int_value("length", -1);
@@ -515,8 +515,45 @@ namespace libtorrent
 			filename_len = 0;
 		}
 
-		files.add_file_borrow(filename, filename_len, path, file_size, file_flags, filehash
-			, mtime, symlink_path);
+		//非NTFS格式且大于4G
+		const size_t GM4GLength = 0xffffffff;
+		if (splitFiles)
+		{
+			if (GM4GLength < file_size)
+			{
+				int nFileIndex = file_size / GM4GLength;
+				int nEndOffset = file_size % GM4GLength;
+				size_t size = file_size;
+
+				std::string orgPath = path;
+				std::string orgFilename;
+				if (filename){
+					orgFilename.append(filename, filename_len);
+				}
+
+				for (int i=0;i<=nFileIndex;i++)
+				{
+					file_size = std::min(GM4GLength, size);
+					char newpath[MAX_PATH] = {0};
+					sprintf(newpath, ("%s.part%d"), orgPath.c_str(), i);
+
+					char newfilename[MAX_PATH] = {0};
+					if (!orgFilename.empty())
+					{
+						sprintf(newfilename, ("%s.part%d"), orgFilename.c_str(), i);
+					}
+					std::string newFileName = newfilename;
+
+					files.add_file_borrow(newFileName.empty()?NULL:newFileName.c_str(), newFileName.empty()?0:newFileName.length(), newpath, file_size, file_flags, filehash, mtime, symlink_path);
+					size -= GM4GLength;
+					splitFiles = true;
+				}
+				return true;
+			} 
+			splitFiles = false;
+		}
+
+		files.add_file_borrow(filename, filename_len, path, file_size, file_flags, filehash, mtime, symlink_path);
 		return true;
 	}
 
@@ -593,8 +630,9 @@ namespace libtorrent
 
 		for (int i = 0, end(list.list_size()); i < end; ++i)
 		{
+			bool splitFile = false;
 			if (!extract_single_file(list.list_at(i), target, root_dir
-				, info_ptr_diff, false, ec))
+				, info_ptr_diff, false, ec, splitFile))
 				return false;
 		}
 		return true;
@@ -634,7 +672,7 @@ namespace libtorrent
 	{
 	}
 
-	torrent_info::torrent_info(torrent_info const& t, bool splitFiles)
+	torrent_info::torrent_info(torrent_info const& t)
 		: m_files(t.m_files)
 		, m_orig_files(t.m_orig_files)
 		, m_urls(t.m_urls)
@@ -649,9 +687,9 @@ namespace libtorrent
 		, m_info_section_size(t.m_info_section_size)
 		, m_merkle_first_leaf(t.m_merkle_first_leaf)
 		, m_multifile(t.m_multifile)
+		, m_splitFiles(t.m_splitFiles)
 		, m_private(t.m_private)
 		, m_i2p(t.m_i2p)
-		, m_splitFiles(false)
 	{
 #if TORRENT_USE_INVARIANT_CHECKS
 		t.check_invariant();
@@ -728,7 +766,6 @@ namespace libtorrent
 #endif
 
 		std::vector<std::string> const& paths = m_files.paths();
-		files.reserve(paths.size() + m_files.num_files());
 
 		// insert all directories first, to make sure no files
 		// are allowed to collied with them
@@ -790,11 +827,12 @@ namespace libtorrent
 
 #ifndef TORRENT_NO_DEPRECATE
 	torrent_info::torrent_info(lazy_entry const& torrent_file, error_code& ec
-		, int flags)
+		, int flags, bool splitFiles)
 		: m_piece_hashes(0)
 		, m_creation_date(0)
 		, m_info_section_size(0)
 		, m_merkle_first_leaf(0)
+		, m_splitFiles(splitFiles)
 		, m_multifile(false)
 		, m_private(false)
 		, m_i2p(false)
@@ -807,11 +845,12 @@ namespace libtorrent
 		parse_torrent_file(e, ec, 0);
 	}
 
-	torrent_info::torrent_info(lazy_entry const& torrent_file, int flags)
+	torrent_info::torrent_info(lazy_entry const& torrent_file, int flags, bool splitFiles)
 		: m_piece_hashes(0)
 		, m_creation_date(0)
 		, m_info_section_size(0)
 		, m_merkle_first_leaf(0)
+		, m_splitFiles(splitFiles)
 		, m_multifile(false)
 		, m_private(false)
 		, m_i2p(false)
@@ -842,10 +881,10 @@ namespace libtorrent
 		, m_creation_date(0)
 		, m_info_section_size(0)
 		, m_merkle_first_leaf(0)
+		, m_splitFiles(splitFiles)
 		, m_multifile(false)
 		, m_private(false)
 		, m_i2p(false)
-		, m_splitFiles(false)
 	{
 		std::vector<char> tmp;
 		std::back_insert_iterator<std::vector<char> > out(tmp);
@@ -862,10 +901,10 @@ namespace libtorrent
 #endif
 		}
 #ifndef BOOST_NO_EXCEPTIONS
-		if (!parse_torrent_file(e, ec, 0, splitFiles))
+		if (!parse_torrent_file(e, ec, 0))
 			throw invalid_torrent_file(ec);
 #else
-		parse_torrent_file(e, ec, 0, splitFiles);
+		parse_torrent_file(e, ec, 0);
 #endif
 		INVARIANT_CHECK;
 	}
@@ -878,12 +917,12 @@ namespace libtorrent
 		, m_info_section_size(0)
 		, m_merkle_first_leaf(0)
 		, m_multifile(false)
+		, m_splitFiles(splitFiles)
 		, m_private(false)
 		, m_i2p(false)
-		, m_splitFiles(false)
 	{
 		error_code ec;
-		if (!parse_torrent_file(torrent_file, ec, flags, splitFiles))
+		if (!parse_torrent_file(torrent_file, ec, flags))
 			throw invalid_torrent_file(ec);
 
 		INVARIANT_CHECK;
@@ -895,16 +934,16 @@ namespace libtorrent
 		, m_info_section_size(0)
 		, m_merkle_first_leaf(0)
 		, m_multifile(false)
+		, m_splitFiles(splitFiles)
 		, m_private(false)
 		, m_i2p(false)
-		, m_splitFiles(false)
 	{
 		error_code ec;
 		bdecode_node e;
 		if (bdecode(buffer, buffer + size, e, ec) != 0)
 			throw invalid_torrent_file(ec);
 
-		if (!parse_torrent_file(e, ec, flags, splitFiles))
+		if (!parse_torrent_file(e, ec, flags))
 			throw invalid_torrent_file(ec);
 
 		INVARIANT_CHECK;
@@ -916,9 +955,9 @@ namespace libtorrent
 		, m_info_section_size(0)
 		, m_merkle_first_leaf(0)
 		, m_multifile(false)
+		, m_splitFiles(splitFiles)
 		, m_private(false)
 		, m_i2p(false)
-		, m_splitFiles(false)
 	{
 		std::vector<char> buf;
 		error_code ec;
@@ -929,7 +968,7 @@ namespace libtorrent
 		if (buf.size() == 0 || bdecode(&buf[0], &buf[0] + buf.size(), e, ec) != 0)
 			throw invalid_torrent_file(ec);
 
-		if (!parse_torrent_file(e, ec, flags, splitFiles))
+		if (!parse_torrent_file(e, ec, flags))
 			throw invalid_torrent_file(ec);
 
 		INVARIANT_CHECK;
@@ -942,9 +981,9 @@ namespace libtorrent
 		, m_info_section_size(0)
 		, m_merkle_first_leaf(0)
 		, m_multifile(false)
+		, m_splitFiles(splitFiles)
 		, m_private(false)
 		, m_i2p(false)
-		, m_splitFiles(false)
 	{
 		std::vector<char> buf;
 		std::string utf8;
@@ -957,7 +996,7 @@ namespace libtorrent
 		if (buf.size() == 0 || bdecode(&buf[0], &buf[0] + buf.size(), e, ec) != 0)
 			throw invalid_torrent_file(ec);
 
-		if (!parse_torrent_file(e, ec, flags, splitFiles))
+		if (!parse_torrent_file(e, ec, flags))
 			throw invalid_torrent_file(ec);
 
 		INVARIANT_CHECK;
@@ -979,11 +1018,11 @@ namespace libtorrent
 		, m_info_section_size(0)
 		, m_merkle_first_leaf(0)
 		, m_multifile(false)
+		, m_splitFiles(splitFiles)
 		, m_private(false)
 		, m_i2p(false)
-		, m_splitFiles(false)
 	{
-		parse_torrent_file(torrent_file, ec, flags, splitFiles);
+		parse_torrent_file(torrent_file, ec, flags);
 
 		INVARIANT_CHECK;
 	}
@@ -994,14 +1033,14 @@ namespace libtorrent
 		, m_info_section_size(0)
 		, m_merkle_first_leaf(0)
 		, m_multifile(false)
+		, m_splitFiles(splitFiles)
 		, m_private(false)
 		, m_i2p(false)
-		, m_splitFiles(false)
 	{
 		bdecode_node e;
 		if (bdecode(buffer, buffer + size, e, ec) != 0)
 			return;
-		parse_torrent_file(e, ec, flags, splitFiles);
+		parse_torrent_file(e, ec, flags);
 
 		INVARIANT_CHECK;
 	}
@@ -1012,9 +1051,9 @@ namespace libtorrent
 		, m_info_section_size(0)
 		, m_merkle_first_leaf(0)
 		, m_multifile(false)
+		, m_splitFiles(splitFiles)
 		, m_private(false)
 		, m_i2p(false)
-		, m_splitFiles(false)
 	{
 		std::vector<char> buf;
 		int ret = load_file(filename, buf, ec);
@@ -1023,7 +1062,7 @@ namespace libtorrent
 		bdecode_node e;
 		if (buf.size() == 0 || bdecode(&buf[0], &buf[0] + buf.size(), e, ec) != 0)
 			return;
-		parse_torrent_file(e, ec, flags, splitFiles);
+		parse_torrent_file(e, ec, flags);
 
 		INVARIANT_CHECK;
 	}
@@ -1037,9 +1076,9 @@ namespace libtorrent
 		, m_info_section_size(0)
 		, m_merkle_first_leaf(0)
 		, m_multifile(false)
+		, m_splitFiles(splitFiles)
 		, m_private(false)
 		, m_i2p(false)
-		, m_splitFiles(false)
 	{
 		std::vector<char> buf;
 		std::string utf8;
@@ -1050,7 +1089,7 @@ namespace libtorrent
 		bdecode_node e;
 		if (buf.size() == 0 || bdecode(&buf[0], &buf[0] + buf.size(), e, ec) != 0)
 			return;
-		parse_torrent_file(e, ec, flags, splitFiles);
+		parse_torrent_file(e, ec, flags);
 
 		INVARIANT_CHECK;
 	}
@@ -1068,7 +1107,7 @@ namespace libtorrent
 		, m_info_section_size(0)
 		, m_merkle_first_leaf(0)
 		, m_multifile(false)
-		, m_splitFiles(false)
+		, m_splitFiles(splitFiles)
 		, m_private(false)
 		, m_i2p(false)
 	{
@@ -1153,12 +1192,11 @@ namespace libtorrent
 		SWAP(tmp2, m_private, ti.m_private);
 		SWAP(tmp2, m_i2p, ti.m_i2p);
 		SWAP(tmp2, m_multifile, ti.m_multifile);
-		SWAP(m_splitFiles, ti.m_splitFiles);
+		SWAP(tmp2, m_splitFiles, ti.m_splitFiles);
 	}
 
 #undef SWAP
 
-	bool torrent_info::parse_info_section(lazy_entry const& info, error_code& ec, int flags, bool splitFiles)
 	std::string torrent_info::ssl_cert() const
 	{
 		// this is parsed lazily
@@ -1237,7 +1275,7 @@ namespace libtorrent
 		{
 			// if there's no list of files, there has to be a length
 			// field.
-			if (!extract_single_file(info, files, "", info_ptr_diff, true, ec))
+			if (!extract_single_file(info, files, "", info_ptr_diff, true, ec, m_splitFiles))
 				return false;
 
 			m_multifile = false;
@@ -1247,6 +1285,7 @@ namespace libtorrent
 			if (!extract_files(files_node, files, name, info_ptr_diff, ec))
 				return false;
 			m_multifile = true;
+			m_splitFiles = false;
 		}
 		TORRENT_ASSERT(!files.name().empty());
 
@@ -1436,11 +1475,9 @@ namespace libtorrent
 		}
 		return ret;
 	}
-
-	bool torrent_info::parse_torrent_file(bdecode_node const& torrent_file
-		, error_code& ec, int flags)
+	
+	bool torrent_info::parse_torrent_file(bdecode_node const& torrent_file, error_code& ec, int flags)
 	{
-	bool torrent_info::parse_torrent_file(lazy_entry const& torrent_file, error_code& ec, int flags, bool splitFiles)
 		if (torrent_file.type() != bdecode_node::dict_t)
 		{
 			ec = errors::torrent_is_no_dict;
@@ -1470,7 +1507,7 @@ namespace libtorrent
 			ec = errors::torrent_missing_info;
 			return false;
 		}
-		if (!parse_info_section(info, ec, flags, splitFiles)) return false;
+		if (!parse_info_section(info, ec, flags)) return false;
 		resolve_duplicate_filenames();
 
 #ifndef TORRENT_DISABLE_MUTABLE_TORRENTS

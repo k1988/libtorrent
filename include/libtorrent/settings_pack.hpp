@@ -204,6 +204,9 @@ namespace libtorrent
 			// used as the peer-id
 			peer_fingerprint,
 
+			// 软件版本号，发送给tracker使用的
+			soft_version,
+
 			max_string_setting_internal
 		};
 

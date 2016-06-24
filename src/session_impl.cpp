@@ -4643,7 +4643,7 @@ retry:
 		std::vector<torrent*>& state_updates
 			= m_torrent_lists[aux::session_impl::torrent_state_updates];
 
-		if (m_state_updates.empty())
+		if (state_updates.empty())
 		{
 			//FIXME Modify by terry 2012.5.3 当没有状态更新时就不发送alert，以防止外部调用者频繁调用此函数引起的alert风暴
 			return;
@@ -6139,7 +6139,6 @@ retry:
 		async_dec_threads();
 #endif
 
-		if (m_thread) m_thread->join();
 		boost::system::error_code ignoreError;
 		stopIoTimer.cancel(ignoreError);
 

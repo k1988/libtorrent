@@ -148,7 +148,7 @@ namespace libtorrent
 				, tracker_req().num_want
 				, stats ? tracker_req().downloadRate: 0
 				, stats ? tracker_req().uploadRate: 0
-				, settings.soft_version.c_str()
+				, settings.get_str(settings_pack::soft_version).c_str()
 				);
 			url += str;
 #if !defined(TORRENT_DISABLE_ENCRYPTION) && !defined(TORRENT_DISABLE_EXTENSIONS)
@@ -447,11 +447,14 @@ namespace libtorrent
 		// if no interval is specified, default to 30 minutes
 		if (interval == 0) interval = 1800;
 		int min_interval = int(e.dict_find_int_value("min interval", 30));
+
 		int pure_bt_speed = int(e.dict_find_int_value("pure bt speed", 200));
 		int seed_speed_policy = int(e.dict_find_int_value("seed speed policy", 0));
 
 		resp.interval = interval;
 		resp.min_interval = min_interval;
+		resp.pure_bt_speed = pure_bt_speed;
+		resp.seed_speed_policy = seed_speed_policy;
 
 		bdecode_node tracker_id = e.dict_find_string("tracker id");
 		if (tracker_id)
@@ -604,8 +607,6 @@ namespace libtorrent
 				resp.external_ip = detail::read_v6_address(p);
 #endif
 		}
-
-			, interval, min_interval, complete, incomplete, external_ip, trackerid, pure_bt_speed, seed_speed_policy);
 		return resp;
 	}
 }

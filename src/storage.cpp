@@ -594,14 +594,14 @@ namespace libtorrent
 				f->set_size(size, ec.ec);
 				if (ec)
 				{
+					ec.file = file_index;
+					ec.operation = storage_error::fallocate;
 					// 设置大小失败后，如果原文件不存在或者大小是0，则删除文件
 					if (not_exist_file || m_stat_cache.get_filesize(file_index) == 0)
 					{
 						f->close();
-						delete_one_file(file_path);
+						delete_one_file(file_path, ec.ec);
 					}
-					ec.file = file_index;
-					ec.operation = storage_error::fallocate;
 					break;
 				}
 				size_t mtime = m_stat_cache.get_filetime(file_index);

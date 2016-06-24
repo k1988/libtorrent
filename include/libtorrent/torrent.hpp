@@ -435,7 +435,6 @@ namespace libtorrent
 		stat statistics() const { return m_stat; }
 		void add_stats(stat const& s);
 		void add_stats(stat const& s, peer_connection* c);
-		size_type bytes_left() const;
 		boost::int64_t bytes_left() const;
 		int block_bytes_wanted(piece_block const& p) const;
 		void bytes_done(torrent_status& st, bool accurate) const;
@@ -713,11 +712,7 @@ namespace libtorrent
 			tracker_request const& r
 			, address const& tracker_ip
 			, std::list<address> const& ip_list
-			, std::vector<peer_entry>& e, int interval, int min_interval
-			, int complete, int incomplete, address const& external_ip
-			, std::string const& trackerid
-			, struct tracker_response const& resp
-			,int pure_bt_speed = 200/*KBPS*/, int seed_speed_policy = 0) TORRENT_OVERRIDE; 
+			, struct tracker_response const& resp) TORRENT_OVERRIDE; 
 		virtual void tracker_request_error(tracker_request const& r
 			, int response_code, error_code const& ec, const std::string& msg
 			, int retry_interval) TORRENT_OVERRIDE;
@@ -959,13 +954,7 @@ namespace libtorrent
 
 		// this is true if we have all the pieces that we want
 		// the pieces don't necessarily need to be flushed to disk
-		bool is_finished() const
-		{
-			if (is_seed()) return true;
-			return valid_metadata() && m_torrent_file->num_pieces()
-				- m_picker->num_have() - m_picker->num_filtered() == 0;
-		}
-
+		bool is_finished() const;
 		bool is_inactive() const;
 
 		std::string save_path() const;
@@ -1216,7 +1205,7 @@ namespace libtorrent
 		// stored in resume data
 		boost::int64_t m_total_uploaded;
 		boost::int64_t m_total_downloaded;
-		size_type m_total_web_downloaded;
+		boost::int64_t m_total_web_downloaded;
 
 		// if this pointer is 0, the torrent is in
 		// a state where the metadata hasn't been
@@ -1454,6 +1443,24 @@ namespace libtorrent
 		// kick out these connections when we get incoming
 		// connections (if we've reached the connection limit)
 		boost::uint16_t m_num_connecting;
+
+
+		// 尝试连接url种子前的间隔(在任务开始之后要等待一段时间之后才进行url种子的连接)
+		boost::int8_t m_url_seed_delay_ticks;
+
+		// 纯粹使用BT种子下载（停止web种子链接）的速度阀值,单位B/S
+		boost::uint32_t m_pure_bt_speed;
+
+		// 每隔一段时间就检测下载速度是否太低，低于一定数值就从Tracker再申请Peer
+		boost::uint32_t m_check_speed_interval;
+
+		// 检测下载速度的倒计时，为0时就检测
+		boost::uint32_t m_check_speed_ticks;
+
+		// 做种策略 0-客户端自己决定 1-全速做种 2-限速做种 3-停止做种
+		boost::uint32_t m_seed_speed_policy;
+
+		int m_url_torrent_speed_mode;
 
 		// ==============================
 		// The following members are specifically
@@ -1742,23 +1749,6 @@ namespace libtorrent
 		// from a non-downloading/seeding state, the torrent is paused.
 		bool m_stop_when_ready:1;
 
-
-        // 尝试连接url种子前的间隔(在任务开始之后要等待一段时间之后才进行url种子的连接)
-        boost::int8_t m_url_seed_delay_ticks;
-
-		// 纯粹使用BT种子下载（停止web种子链接）的速度阀值,单位B/S
-		boost::uint32_t m_pure_bt_speed;
-
-		// 每隔一段时间就检测下载速度是否太低，低于一定数值就从Tracker再申请Peer
-		boost::uint32_t m_check_speed_interval;
-
-		// 检测下载速度的倒计时，为0时就检测
-		boost::uint32_t m_check_speed_ticks;
-
-		// 做种策略 0-客户端自己决定 1-全速做种 2-限速做种 3-停止做种
-		boost::uint32_t m_seed_speed_policy;
-
-		int m_url_torrent_speed_mode;
 #if TORRENT_USE_ASSERTS
 
 	public:

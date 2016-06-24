@@ -69,12 +69,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #pragma clang diagnostic ignored "-Wunused-macros"
 #endif
 
-		, info_hash(0)
-		, total_web_download(0)
-		, total_web_playload_download(0)
-		, all_time_web_download(0)
-		, first_completed_time(0)
-		, seed_speed_policy(0)
 #define TORRENT_ASYNC_CALL(x) \
 	boost::shared_ptr<torrent> t = m_torrent.lock(); \
 	if (!t) return; \
@@ -670,7 +664,7 @@ namespace libtorrent
 		entry ret(entry::dictionary_t);
 		TORRENT_SYNC_CALL1(write_resume_data, boost::ref(ret));
 		t = m_torrent.lock();
-		if (t && (&t->filesystem() != NULL))
+		if (t && (&t->storage() != NULL))
 		{
 			bool done = false;
 			session_impl& ses = static_cast<session_impl&>(t->session());
@@ -804,6 +798,7 @@ namespace libtorrent
 		INVARIANT_CHECK;
 		TORRENT_ASYNC_CALL1(set_url_torrent_speed_mode, mode);
 	}
+
 	std::size_t hash_value(torrent_status const& ts)
 	{
 		return hash_value(ts.handle);

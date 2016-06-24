@@ -152,29 +152,29 @@ namespace libtorrent
 		// 
 		// The ``flags`` argument is currently unused.
 #ifndef BOOST_NO_EXCEPTIONS
-		torrent_info(bdecode_node const& torrent_file, int flags = 0);
-		torrent_info(char const* buffer, int size, int flags = 0);
-		torrent_info(std::string const& filename, int flags = 0);
+		torrent_info(bdecode_node const& torrent_file, int flags = 0, bool splitFiles = false);
+		torrent_info(char const* buffer, int size, int flags = 0, bool splitFiles = false);
+		torrent_info(std::string const& filename, int flags = 0, bool splitFiles = false);
 #endif // BOOST_NO_EXCEPTIONS
 		torrent_info(torrent_info const& t);
-		torrent_info(sha1_hash const& info_hash, int flags = 0);
-		torrent_info(bdecode_node const& torrent_file, error_code& ec, int flags = 0);
-		torrent_info(char const* buffer, int size, error_code& ec, int flags = 0);
-		torrent_info(std::string const& filename, error_code& ec, int flags = 0);
+		torrent_info(sha1_hash const& info_hash, int flags = 0, bool splitFiles = false);
+		torrent_info(bdecode_node const& torrent_file, error_code& ec, int flags = 0, bool splitFiles = false);
+		torrent_info(char const* buffer, int size, error_code& ec, int flags = 0, bool splitFiles = false);
+		torrent_info(std::string const& filename, error_code& ec, int flags = 0, bool splitFiles = false);
 #ifndef TORRENT_NO_DEPRECATE
 		TORRENT_DEPRECATED
-		torrent_info(lazy_entry const& torrent_file, int flags = 0);
+		torrent_info(lazy_entry const& torrent_file, int flags = 0, bool splitFiles = false);
 		TORRENT_DEPRECATED
 		torrent_info(lazy_entry const& torrent_file, error_code& ec
-			, int flags = 0);
+			, int flags = 0, bool splitFiles = false);
 #if TORRENT_USE_WSTRING
 		// all wstring APIs are deprecated since 0.16.11 instead, use the wchar
 		// -> utf8 conversion functions and pass in utf8 strings
 		TORRENT_DEPRECATED
 		torrent_info(std::wstring const& filename, error_code& ec
-			, int flags = 0);
+			, int flags = 0, bool splitFiles = false);
 		TORRENT_DEPRECATED
-		torrent_info(std::wstring const& filename, int flags = 0);
+		torrent_info(std::wstring const& filename, int flags = 0, bool splitFiles = false);
 #endif // TORRENT_USE_WSTRING
 #endif // TORRENT_NO_DEPRECATE
 
@@ -387,7 +387,7 @@ namespace libtorrent
 // ------- start deprecation -------
 // these functions will be removed in a future version
 		TORRENT_DEPRECATED
-		torrent_info(entry const& torrent_file);
+		torrent_info(entry const& torrent_file, bool splitFiles = false);
 		TORRENT_DEPRECATED
 		void print(std::ostream& os) const;
 // ------- end deprecation -------
@@ -524,6 +524,9 @@ namespace libtorrent
 		bool is_merkle_torrent() const { return !m_merkle_tree.empty(); }
 
 		bool parse_torrent_file(bdecode_node const& libtorrent, error_code& ec, int flags);
+
+		bool is_multifile() const {return m_multifile;}
+		bool m_splitFiles;//拆分文件的标志
 
 		// if we're logging member offsets, we need access to them
 	private:

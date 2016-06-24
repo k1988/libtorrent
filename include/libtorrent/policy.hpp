@@ -170,8 +170,8 @@ namespace libtorrent
 		{
 			peer(boost::uint16_t port, bool connectable, int src);
 
-			size_type total_download() const;
-			size_type total_upload() const;
+			size_t total_download() const;
+			size_t total_upload() const;
 
 			libtorrent::address address() const;
 			char const* dest() const;
