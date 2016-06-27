@@ -1757,6 +1757,9 @@ namespace libtorrent
 	public:
 		// set to false until we've loaded resume data
 		bool m_resume_data_loaded;
+
+		// set to true when torrent is start()ed. It may only be started once
+		bool m_was_started;
 #endif
 	};
 
