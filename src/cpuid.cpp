@@ -37,9 +37,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #if defined _MSC_VER && TORRENT_HAS_SSE
 #include <intrin.h>
-#if _MSC_VER >= 1600
 #include <nmmintrin.h>
-#endif
 #endif
 
 #if TORRENT_HAS_SSE && defined __GNUC__

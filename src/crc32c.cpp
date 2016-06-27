@@ -36,7 +36,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/aux_/disable_warnings_push.hpp"
 
 #include <boost/crc.hpp>
-#if (defined _MSC_VER && _MSC_VER >= 1600)
+#ifdef _MSC_VER
 #include <nmmintrin.h>
 #endif
 
@@ -46,7 +46,7 @@ namespace libtorrent
 {
 	boost::uint32_t crc32c_32(boost::uint32_t v)
 	{
-#if (TORRENT_HAS_SSE && defined _MSC_VER && _MSC_VER >= 1600)
+#if TORRENT_HAS_SSE
 		if (aux::sse42_support)
 		{
 			boost::uint32_t ret = 0xffffffff;
@@ -71,7 +71,7 @@ namespace libtorrent
 
 	boost::uint32_t crc32c(boost::uint64_t const* buf, int num_words)
 	{
-#if (TORRENT_HAS_SSE && defined _MSC_VER && _MSC_VER >= 1600)
+#if TORRENT_HAS_SSE
 		if (aux::sse42_support)
 		{
 #if defined _M_AMD64 || defined __x86_64__ \
