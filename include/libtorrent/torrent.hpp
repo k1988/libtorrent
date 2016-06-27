@@ -1418,6 +1418,9 @@ namespace libtorrent
 		// set_error()
 		int m_error_file;
 
+		// ´íÎóÊ±µÄ²Ù×÷
+		char const* m_error_operation;
+
 		// the average time it takes to download one time critical piece
 		boost::uint32_t m_average_piece_time;
 

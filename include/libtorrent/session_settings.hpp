@@ -64,10 +64,6 @@ namespace libtorrent
 		session_settings& operator=(session_settings const&) = default;
 #endif
 
-
-		//快吧版本号
-		std::string soft_version;
-
 		// automatically set to the libtorrent version you're using in order to
 		// be forward binary compatible. This field should not be changed.
 		int version;
@@ -1366,6 +1362,9 @@ namespace libtorrent
 		// the version string to advertise for this client in the peer protocol
 		// handshake. If this is empty the user_agent is used
 		std::string handshake_client_version;
+
+		//快吧版本号
+		std::string soft_version;
 
 		// if this is true, the disk cache uses a pool allocator for disk cache
 		// blocks. Enabling this improves performance of the disk cache with the

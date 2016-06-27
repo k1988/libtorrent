@@ -150,6 +150,9 @@ namespace libtorrent
 			// used instead
 			handshake_client_version,
 
+			// 软件版本号，发送给tracker使用的
+			soft_version,
+
 			// sets the network interface this session will use when it opens
 			// outgoing connections. By default, it binds outgoing connections to
 			// INADDR_ANY and port 0 (i.e. let the OS decide). Ths parameter must
@@ -203,9 +206,6 @@ namespace libtorrent
 			// prefix to the peer_id. If this is 20 bytes (or longer) it will be
 			// used as the peer-id
 			peer_fingerprint,
-
-			// 软件版本号，发送给tracker使用的
-			soft_version,
 
 			max_string_setting_internal
 		};

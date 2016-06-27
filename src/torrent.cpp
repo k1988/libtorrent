@@ -270,6 +270,7 @@ namespace libtorrent
 		, m_check_speed_ticks(120)
 		, m_seed_speed_policy(0)
 		, m_url_torrent_speed_mode(url_torrent_limit_speed)
+		, m_error_operation(NULL)
 		, m_is_active_download(false)
 		, m_is_active_finished(false)
 		, m_ssl_torrent(false)
@@ -1237,26 +1238,27 @@ namespace libtorrent
 		// if we make an incorrect assumption here, it's not the end of the
 		// world, if we ever issue a read request and it fails as well, we
 		// won't get in here and we'll actually end up pausing the torrent
-		if (j->action == disk_io_job::write
-			&& (j->error.ec == boost::system::errc::read_only_file_system
-			|| j->error.ec == boost::system::errc::permission_denied
-			|| j->error.ec == boost::system::errc::operation_not_permitted
-			|| j->error.ec == boost::system::errc::no_space_on_device
-			|| j->error.ec == boost::system::errc::file_too_large))
-		{
-			// if we failed to write, stop downloading and just
-			// keep seeding.
-			// TODO: 1 make this depend on the error and on the filesystem the
-			// files are being downloaded to. If the error is no_space_left_on_device
-			// and the filesystem doesn't support sparse files, only zero the priorities
-			// of the pieces that are at the tails of all files, leaving everything
-			// up to the highest written piece in each file
-			set_upload_mode(true);
-			return;
-		}
+		//if (j->action == disk_io_job::write
+		//	&& (j->error.ec == boost::system::errc::read_only_file_system
+		//	|| j->error.ec == boost::system::errc::permission_denied
+		//	|| j->error.ec == boost::system::errc::operation_not_permitted
+		//	|| j->error.ec == boost::system::errc::no_space_on_device
+		//	|| j->error.ec == boost::system::errc::file_too_large))
+		//{
+		//	// if we failed to write, stop downloading and just
+		//	// keep seeding.
+		//	// TODO: 1 make this depend on the error and on the filesystem the
+		//	// files are being downloaded to. If the error is no_space_left_on_device
+		//	// and the filesystem doesn't support sparse files, only zero the priorities
+		//	// of the pieces that are at the tails of all files, leaving everything
+		//	// up to the highest written piece in each file
+		//	set_upload_mode(true);
+		//	return;
+		//}
 
 		// put the torrent in an error-state
 		set_error(j->error.ec, j->error.file);
+		m_error_operation = j->error.operation_str();
 
 		// if the error appears to be more serious than a full disk, just pause the torrent
 		pause();
@@ -2805,6 +2807,7 @@ namespace libtorrent
 				auto_managed(false);
 				pause();
 				set_error(j->error.ec, j->error.file);
+				m_error_operation = j->error.operation_str();
 
 				// recalculate auto-managed torrents sooner
 				// in order to start checking the next torrent
@@ -3477,7 +3480,7 @@ namespace libtorrent
 			ae->next_announce = now + seconds(interval);
 			ae->min_announce = now + seconds(resp.min_interval);
 
-			if (r.event == tracker_request::started && resp.peers.size() < r.num_want)
+			if (r.event == tracker_request::started && (resp.peers4.size() + resp.peers6.size() + resp.peers.size()) < r.num_want)
 			{
 				//返回peer小于申请的数量，就更改访问tracker的频率(为min_interval和10分之1的Interval的最小值）
 				double ratio = resp.peers.size() * 1.0 / r.num_want;
@@ -9486,6 +9489,7 @@ namespace libtorrent
 		TORRENT_ASSERT(is_single_thread());
 		m_error = ec;
 		m_error_file = error_file;
+		m_error_operation = NULL;
 
 		update_gauge();
 
@@ -12161,8 +12165,15 @@ namespace libtorrent
 		st->error_file = m_error_file;
 
 #ifndef TORRENT_NO_DEPRECATE
+		std::string operation;
+		if (m_error_operation)
+		{
+			operation = m_error_operation;
+			operation.append(1, ' - ');
+		}
+		
 		if (m_error) st->error = convert_from_native(m_error.message())
-			+ ": " + resolve_filename(m_error_file);
+			+ ": " + operation + resolve_filename(m_error_file);
 #endif
 		st->seed_mode = m_seed_mode;
 		st->moving_storage = m_moving_storage;
