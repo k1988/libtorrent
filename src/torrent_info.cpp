@@ -537,14 +537,7 @@ namespace libtorrent
 					char newpath[MAX_PATH] = {0};
 					sprintf(newpath, ("%s.part%d"), orgPath.c_str(), i);
 
-					char newfilename[MAX_PATH] = {0};
-					if (!orgFilename.empty())
-					{
-						sprintf(newfilename, ("%s.part%d"), orgFilename.c_str(), i);
-					}
-					std::string newFileName = newfilename;
-
-					files.add_file_borrow(newFileName.empty()?NULL:newFileName.c_str(), newFileName.empty()?0:newFileName.length(), newpath, file_size, file_flags, filehash, mtime, symlink_path);
+					files.add_file(newpath, file_size, file_flags, mtime, symlink_path);
 					size -= GM4GLength;
 					splitFiles = true;
 				}
