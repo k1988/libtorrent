@@ -269,6 +269,7 @@ namespace libtorrent
 		, m_check_speed_interval(120)
 		, m_check_speed_ticks(120)
 		, m_seed_speed_policy(0)
+		, m_cacheFlushed(false)
 		, m_url_torrent_speed_mode(url_torrent_limit_speed)
 		, m_error_operation(NULL)
 		, m_is_active_download(false)
@@ -3489,7 +3490,7 @@ namespace libtorrent
 
 			if (r.event == tracker_request::started && (resp.peers4.size() + resp.peers6.size() + resp.peers.size()) < r.num_want)
 			{
-				//返回peer小于申请的数量，就更改访问tracker的频率(为min_interval和10分之1的Interval的最小值）
+				//返回peer小于申请的数量，就更改访问tracker的频率(为min_interval和10分之1的Interval的最大值）
 				double ratio = resp.peers.size() * 1.0 / r.num_want;
 				ratio = std::max(ratio, 0.1);
 				int new_interval = interval * ratio;
@@ -8560,6 +8561,7 @@ namespace libtorrent
 
 		TORRENT_ASSERT(is_finished());
 
+		m_cacheFlushed = false;
 		set_state(torrent_status::finished);
 		set_queue_position(-1);
 
@@ -8614,6 +8616,10 @@ namespace libtorrent
 			inc_refcount("release_files");
 			m_ses.disk_thread().async_release_files(m_storage.get()
 				, boost::bind(&torrent::on_cache_flushed, shared_from_this(), _1));
+		}
+		else
+		{
+			m_cacheFlushed = true;
 		}
 
 		// this torrent just completed downloads, which means it will fall
@@ -9801,6 +9807,8 @@ namespace libtorrent
 	{
 		dec_refcount("release_files");
 		TORRENT_ASSERT(is_single_thread());
+
+		m_cacheFlushed = true;
 
 		if (m_ses.is_aborted()) return;
 
@@ -12185,6 +12193,7 @@ namespace libtorrent
 		st->seed_mode = m_seed_mode;
 		st->moving_storage = m_moving_storage;
 		st->seed_speed_policy = m_seed_speed_policy;
+		st->cacheFlushed = m_cacheFlushed;
 
 		st->announcing_to_trackers = m_announce_to_trackers;
 		st->announcing_to_lsd = m_announce_to_lsd;

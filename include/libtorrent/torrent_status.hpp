@@ -531,6 +531,9 @@ namespace libtorrent
 		//是否拆分文件
 		bool splitFiles;
 
+		// 是否在finished状态后，所有缓存都刷入磁盘
+		bool cacheFlushed;
+
 		// the info-hash for this torrent
 		sha1_hash info_hash;
 	};

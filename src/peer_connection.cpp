@@ -80,7 +80,9 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/performance_counters.hpp" // for counters
 #include "libtorrent/alert_manager.hpp" // for alert_manageralert_manager
 #include "libtorrent/ip_filter.hpp"
+#ifndef TORRENT_DISABLE_DHT
 #include "libtorrent/kademlia/node_id.hpp"
+#endif // TORRENT_DISABLE_DHT
 #include "libtorrent/close_reason.hpp"
 #include "libtorrent/aux_/time.hpp"
 

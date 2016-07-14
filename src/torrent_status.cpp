@@ -110,6 +110,7 @@ namespace libtorrent
 		, all_time_web_download(0)
 		, first_completed_time(0)
 		, seed_speed_policy(0)
+		, cacheFlushed(false)
 		, info_hash(0)
 	{}
 

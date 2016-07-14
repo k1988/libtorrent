@@ -1463,6 +1463,9 @@ namespace libtorrent
 		// 做种策略 0-客户端自己决定 1-全速做种 2-限速做种 3-停止做种
 		boost::uint32_t m_seed_speed_policy;
 
+		// 是否已经将缓存刷入磁盘
+		bool m_cacheFlushed;
+
 		int m_url_torrent_speed_mode;
 
 		// ==============================
