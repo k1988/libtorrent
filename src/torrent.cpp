@@ -1976,16 +1976,18 @@ namespace libtorrent
 		m_resume_data_loaded = true;
 #endif
 
-		if (m_seed_mode)
+		if (m_seed_mode && !settings().get_bool(settings_pack::disable_seed_download))
 		{
-			/*if (settings().get_bool(settings_pack::disable_seed_download))
-			{
-				set_state(torrent_status::checking_resume_data);
-				m_ses.disk_thread().async_check_fastresume(&m_resume_entry
-					, boost::bind(&torrent::on_resume_data_checked
-					, shared_from_this(), _1, _2));
-				return;
-			}*/
+			//if (settings().get_bool(settings_pack::disable_seed_download))
+			//{
+			//	set_state(torrent_status::checking_resume_data);
+			//	// async_check_fastresume will gut links
+			//	m_ses.disk_thread().async_check_fastresume(
+			//		m_storage.get(), m_resume_data ? &m_resume_data->node : NULL
+			//		, links, boost::bind(&torrent::on_resume_data_checked
+			//		, shared_from_this(), _1));
+			//	return;
+			//}
 
 			m_have_all = true;
 			m_ses.get_io_service().post(boost::bind(&torrent::files_checked, shared_from_this()));
@@ -8884,7 +8886,7 @@ namespace libtorrent
 
 	bool torrent::is_finished() const
 	{
-		if (is_seed() && !settings().get_bool(settings_pack::disable_seed_download)) 
+		if (is_seed()) 
 		{
 			return true;
 		}
