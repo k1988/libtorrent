@@ -533,7 +533,7 @@ namespace libtorrent
 
 				for (int i=0;i<=nFileIndex;i++)
 				{
-					file_size = std::min(GM4GLength, size);
+					file_size = (i == nFileIndex ? std::min(GM4GLength, size) : GM4GLength);
 					char newpath[MAX_PATH] = {0};
 					sprintf(newpath, ("%s.part%d"), orgPath.c_str(), i);
 
@@ -1271,7 +1271,7 @@ namespace libtorrent
 			if (!extract_single_file(info, files, "", info_ptr_diff, true, ec, m_splitFiles))
 				return false;
 
-			m_multifile = false;
+			m_multifile = m_splitFiles;
 		}
 		else
 		{
