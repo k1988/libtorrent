@@ -408,8 +408,9 @@ namespace libtorrent
 
 #ifndef TORRENT_DISABLE_LOGGING
 		if (t)
-			t->debug_log("START connect [%p] (%d)", static_cast<void*>(this)
-				, int(t->num_peers()));
+			t->debug_log("START connect [%p] (%d) [%s]", static_cast<void*>(this)
+				, int(t->num_peers())
+				, m_peer_info->to_string().c_str());
 #endif
 
 		m_socket->async_connect(m_remote
@@ -6316,7 +6317,7 @@ namespace libtorrent
 #ifndef TORRENT_DISABLE_LOGGING
 		{
 			boost::shared_ptr<torrent> t = m_torrent.lock();
-			if (t) t->debug_log("END connect [%p]", static_cast<void*>(this));
+			if (t) t->debug_log("END connect [%p] [e:%s]", static_cast<void*>(this), e.message());
 			m_connect_time = completed;
 		}
 #endif

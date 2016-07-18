@@ -10500,7 +10500,7 @@ namespace libtorrent
 
 			if (!p->ignore_stats())
             {
-				m_stat += p->statistics();
+				//m_stat += p->statistics();
 
                 //update stats of web connections
                 if (p->type() == peer_connection::http_seed_connection
@@ -12518,14 +12518,14 @@ namespace libtorrent
 		TORRENT_ASSERT(m_ses.is_network_thread());
 		// these stats are propagated to the session
 		// stats the next time second_tick is called
-		m_stat += s;
+		//m_stat += s;
 
 		//update stats of web connections
-		if (c->type() == peer_connection::http_seed_connection
+		/*if (c->type() == peer_connection::http_seed_connection
 			|| c->type() == peer_connection::url_seed_connection)
 		{
 			m_webStat += c->statistics();
-		}
+		}*/
 	}
 
 #ifndef TORRENT_DISABLE_LOGGING
