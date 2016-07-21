@@ -433,7 +433,6 @@ namespace libtorrent
 		std::string name() const;
 
 		stat statistics() const { return m_stat; }
-		void add_stats(stat const& s);
 		void add_stats(stat const& s, peer_connection* c);
 		boost::int64_t bytes_left() const;
 		int block_bytes_wanted(piece_block const& p) const;
@@ -555,6 +554,7 @@ namespace libtorrent
 		void use_interface(std::string net_interface);
 #endif
 
+		void on_peer_connected(peer_connection* c);
 		void connect_to_url_seed(std::list<web_seed_t>::iterator url);
 		bool connect_to_peer(torrent_peer* peerinfo, bool ignore_limit = false);
 
@@ -1318,6 +1318,9 @@ namespace libtorrent
 
 		// the performance counters of this session
 		counters& m_stats_counters;
+
+		// add by terry: 统计此种子的下载信息，主要为了统计连接上的peer数
+		counters m_torrent_counnters;
 
 		// each bit represents a piece. a set bit means
 		// the piece has had its hash verified. This

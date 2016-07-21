@@ -4042,6 +4042,11 @@ namespace libtorrent
 		if (m_holepunch_mode)
 			fast_reconnect(true);
 
+#ifndef TORRENT_DISABLE_LOGGING
+		peer_log(peer_log_alert::info, "CONNECTION FAILED"
+			, " isUtp:%d support holepunch:%d holepunch_mode:%d", is_utp(*m_socket), m_peer_info?m_peer_info->supports_holepunch:0, m_holepunch_mode);
+#endif
+
 #ifndef TORRENT_DISABLE_EXTENSIONS
 		if ((!is_utp(*m_socket)
 				|| !m_settings.get_bool(settings_pack::enable_outgoing_tcp))
@@ -6448,6 +6453,11 @@ namespace libtorrent
 			(*i)->on_connected();
 		}
 #endif
+
+		if (t)
+		{
+			t->on_peer_connected(this);
+		}
 
 		on_connected();
 		setup_send();

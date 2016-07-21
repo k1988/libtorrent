@@ -12222,6 +12222,7 @@ namespace libtorrent
 		}
 		st->priority = priority;
 
+		st->connectedPeersNum = m_torrent_counnters[counters::num_peers_connected];
 		st->num_peers = int(m_connections.size()) - m_num_connecting;
 
 		st->list_peers = m_peer_list ? m_peer_list->num_peers() : 0;
@@ -12512,6 +12513,15 @@ namespace libtorrent
 		m_url_torrent_speed_mode = mode;
 	}
 
+	// add by terry, 为了统计连接的bt通道数
+	void torrent::on_peer_connected( peer_connection* c )
+	{
+		if (c->type() == peer_connection::bittorrent_connection)
+		{
+			m_torrent_counnters.inc_stats_counter(counters::num_peers_connected);
+		}
+	}
+
 	// add by terry, 为了统计http下载通道的下载率
 	void torrent::add_stats( stat const& s, peer_connection* c )
 	{
@@ -12521,11 +12531,11 @@ namespace libtorrent
 		//m_stat += s;
 
 		//update stats of web connections
-		/*if (c->type() == peer_connection::http_seed_connection
+		if (c->type() == peer_connection::http_seed_connection
 			|| c->type() == peer_connection::url_seed_connection)
 		{
 			m_webStat += c->statistics();
-		}*/
+		}
 	}
 
 #ifndef TORRENT_DISABLE_LOGGING

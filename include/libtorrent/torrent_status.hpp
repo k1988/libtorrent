@@ -534,6 +534,9 @@ namespace libtorrent
 		// 是否在finished状态后，所有缓存都刷入磁盘
 		bool cacheFlushed;
 
+		// 连接成功过的BT种子数
+		boost::int64_t connectedPeersNum;
+
 		// the info-hash for this torrent
 		sha1_hash info_hash;
 	};
