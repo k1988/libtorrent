@@ -256,8 +256,8 @@ void lsd::on_announce(udp::endpoint const& from, char* buf
 		if (cookie == m_cookie)
 		{
 #ifndef TORRENT_DISABLE_LOGGING
-			debug_log("<== LSD: ignoring packet (cookie matched our own): %x == %x"
-				, cookie, m_cookie);
+			/*debug_log("<== LSD: ignoring packet (cookie matched our own): %x == %x"
+				, cookie, m_cookie);*/
 #endif
 			return;
 		}

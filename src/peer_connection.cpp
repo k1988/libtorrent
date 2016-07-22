@@ -410,7 +410,7 @@ namespace libtorrent
 		if (t)
 			t->debug_log("START connect [%p] (%d) [%s]", static_cast<void*>(this)
 				, int(t->num_peers())
-				, m_peer_info->to_string().c_str());
+				, m_peer_info?m_peer_info->to_string().c_str():"");
 #endif
 
 		m_socket->async_connect(m_remote
