@@ -12306,7 +12306,8 @@ namespace libtorrent
 			std::vector<announce_entry>::const_iterator i;
 			for (i = m_trackers.begin(); i != m_trackers.end(); ++i)
 			{
-				if (!i->updating) continue;
+				if (i->updating) continue;
+				if (!i->verified) continue;
 				st->current_tracker = i->url;
 				break;
 			}
