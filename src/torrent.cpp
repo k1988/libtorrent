@@ -9985,7 +9985,7 @@ namespace libtorrent
 	{
 		web_seed_t ent(url, type);
 		// don't add duplicates
-		if (std::find(m_web_seeds.begin(), m_web_seeds.end(), ent) != m_web_seeds.end()) return;
+		// if (std::find(m_web_seeds.begin(), m_web_seeds.end(), ent) != m_web_seeds.end()) return;
 		m_web_seeds.push_back(ent);
 		set_need_save_resume();
 	}
@@ -11475,12 +11475,21 @@ namespace libtorrent
 
 	void torrent::remove_web_seed(std::string const& url, web_seed_entry::type_t type)
 	{
-		std::list<web_seed_t>::iterator i = std::find_if(m_web_seeds.begin()
-			, m_web_seeds.end()
-			, (boost::bind(&web_seed_t::url, _1)
+		std::list<web_seed_t>::iterator i = m_web_seeds.end();
+		do 
+		{
+			i = std::find_if(m_web_seeds.begin()
+				, m_web_seeds.end()
+				, (boost::bind(&web_seed_t::url, _1)
 				== url && boost::bind(&web_seed_t::type, _1) == type));
+			if (i != m_web_seeds.end()) {
+				remove_web_seed(i);
+				continue;
+			} else {
+				break;
+			}
 
-		if (i != m_web_seeds.end()) remove_web_seed(i);
+		} while (true);
 	}
 
 	void torrent::disconnect_web_seed(peer_connection* p)
