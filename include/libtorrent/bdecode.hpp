@@ -98,18 +98,23 @@ example layout:
 
 namespace libtorrent {
 
-TORRENT_EXPORT boost::system::error_category& get_bdecode_category();
+TORRENT_EXPORT boost::system::error_category& bdecode_category();
+
+#ifndef TORRENT_NO_DEPRECATED
+TORRENT_DEPRECATED TORRENT_EXPORT
+boost::system::error_category& get_bdecode_category();
+#endif
 
 namespace bdecode_errors
 {
 	// libtorrent uses boost.system's ``error_code`` class to represent
-	// errors. libtorrent has its own error category get_bdecode_category()
+	// errors. libtorrent has its own error category bdecode_category()
 	// with the error codes defined by error_code_enum.
 	enum error_code_enum
 	{
 		// Not an error
 		no_error = 0,
-		// expected string in bencoded string
+		// expected digit in bencoded string
 		expected_digit,
 		// expected colon in bencoded string
 		expected_colon,
@@ -138,8 +143,6 @@ namespace boost { namespace system {
 	template<> struct is_error_code_enum<libtorrent::bdecode_errors::error_code_enum>
 	{ static const bool value = true; };
 
-	template<> struct is_error_condition_enum<libtorrent::bdecode_errors::error_code_enum>
-	{ static const bool value = true; };
 } }
 
 namespace libtorrent {
@@ -336,7 +339,7 @@ struct TORRENT_EXPORT bdecode_node
 	// Swap contents.
 	void swap(bdecode_node& n);
 
-	// pre-allocate memory for the specified numbers of tokens. This is
+	// preallocate memory for the specified numbers of tokens. This is
 	// useful if you know approximately how many tokens are in the file
 	// you are about to parse. Doing so will save realloc operations
 	// while parsing. You should only call this on the root node, before

@@ -32,7 +32,6 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "libtorrent/session.hpp"
 #include "libtorrent/session_settings.hpp"
-#include "libtorrent/hasher.hpp"
 #include "libtorrent/alert_types.hpp"
 #include "libtorrent/bencode.hpp"
 #include "libtorrent/thread.hpp"
@@ -44,6 +43,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "test.hpp"
 #include "setup_transfer.hpp"
+#include "settings.hpp"
 #include <fstream>
 #include <iostream>
 
@@ -121,10 +121,6 @@ void test_transfer(settings_pack const& sett)
 	std::ofstream file("tmp1_priority/temporary");
 	boost::shared_ptr<torrent_info> t = ::create_torrent(&file, "temporary", 16 * 1024, 13, false);
 	file.close();
-
-	add_torrent_params addp;
-	addp.flags &= ~add_torrent_params::flag_paused;
-	addp.flags &= ~add_torrent_params::flag_auto_managed;
 
 	wait_for_listen(ses1, "ses1");
 	wait_for_listen(ses2, "ses1");
@@ -374,7 +370,7 @@ done:
 TORRENT_TEST(priority)
 {
 	using namespace libtorrent;
-	settings_pack p;
+	settings_pack p = settings();
 	test_transfer(p);
 	cleanup();
 }
@@ -383,7 +379,7 @@ TORRENT_TEST(priority)
 // yet
 TORRENT_TEST(no_metadata_file_prio)
 {
-	settings_pack pack;
+	settings_pack pack = settings();
 	lt::session ses(pack);
 
 	add_torrent_params addp;
@@ -403,7 +399,7 @@ TORRENT_TEST(no_metadata_file_prio)
 
 TORRENT_TEST(no_metadata_piece_prio)
 {
-	settings_pack pack;
+	settings_pack pack = settings();
 	lt::session ses(pack);
 
 	add_torrent_params addp;

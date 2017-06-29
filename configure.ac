@@ -5,7 +5,7 @@
 
 AC_PREREQ([2.63])
 
-AC_INIT([libtorrent-rasterbar],[1.1.0],[arvid@libtorrent.org],
+AC_INIT([libtorrent-rasterbar],[1.1.3],[arvid@libtorrent.org],
         [libtorrent-rasterbar],[http://www.libtorrent.org])
 AC_CONFIG_SRCDIR([src/torrent.cpp])
 AC_CONFIG_AUX_DIR([build-aux])
@@ -79,7 +79,7 @@ AC_CANONICAL_TARGET
 AS_ECHO
 AS_ECHO "Initializing Automake:"
 AM_INIT_AUTOMAKE([1.11 foreign])
-
+AM_MAINTAINER_MODE([enable])
 
 AS_ECHO
 AS_ECHO "Initializing Libtool:"
@@ -117,7 +117,7 @@ AC_CACHE_CHECK([for __attribute__((visibility("hidden")))],
 AS_ECHO
 AS_ECHO "Checking for boost libraries:"
 
-AX_BOOST_BASE([1.47])
+AX_BOOST_BASE([1.53])
 
 AX_BOOST_SYSTEM()
 AS_IF([test -z "$BOOST_SYSTEM_LIB"],
@@ -556,11 +556,14 @@ AC_SUBST(DEBUGFLAGS)
 AC_SUBST(PYTHON_INSTALL_PARAMS)
 AC_SUBST(COMPILETIME_OPTIONS)
 
+# Disable deprecated warnings for the Python binding builds.
+PYTHON_CXXFLAGS="${PYTHON_CXXFLAGS} -Wno-deprecated-declarations"
+AC_SUBST(PYTHON_CXXFLAGS)
 
-# Try to guess real svn revision if any, fallback to hardcoded otherwise
-SVN_REVISION=`svn info 2>/dev/null | sed -n -e '/^URL\:.*libtorrent.svn.sourceforge.net/,$!d;s,^Revision\: \([[0-9]]*\)$,\1,p'`
-AS_IF([test -z "$SVN_REVISION"],
-      [SVN_REVISION=`sed -n -e 's/^#define LIBTORRENT_REVISION \"\$Rev\: \([0-9]*\) \$\" $/\1/p' include/libtorrent/version.hpp`])
+# Try to guess real git revision if any, fallback to hardcoded otherwise
+GIT_REVISION=`git log -1 --format=format:%h 2>/dev/null`
+AS_IF([test -z "$GIT_REVISION"],
+      [GIT_REVISION=`sed -n -e "s/^#define LIBTORRENT_REVISION \"\([0-9a-z]*\)\"$/\1/p" $(dirname $0)/include/libtorrent/version.hpp`])
 
 
 ###############################################################################
@@ -603,7 +606,7 @@ cat > config.report << END
 Package:
   name:                 ${PACKAGE_NAME}
   version:              ${PACKAGE_VERSION}
-  svn revision:         ${SVN_REVISION}
+  git revision:         ${GIT_REVISION}
 
 Build environment:
   build system:         ${build}
@@ -693,7 +696,7 @@ OpenSSL library:
   OpenSSL Libs:         ${OPENSSL_LIBS}
   OpenSSL LDFlags:      ${OPENSSL_LDFLAGS}
   OpenSSL Includes:     ${OPENSSL_INCLUDES}
-END 
+END
 ])
 
 cat config.report

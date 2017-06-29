@@ -95,17 +95,22 @@ namespace libtorrent
 		return msgs[ev];
 	}
 
-	boost::system::error_category& get_gzip_category()
+	boost::system::error_category& gzip_category()
 	{
-		static gzip_error_category gzip_category;
-		return gzip_category;
+		static gzip_error_category category;
+		return category;
 	}
+
+#ifndef TORRENT_NO_DEPRECATE
+	boost::system::error_category& get_gzip_category()
+	{ return gzip_category(); }
+#endif
 
 	namespace gzip_errors
 	{
 		boost::system::error_code make_error_code(error_code_enum e)
 		{
-			return boost::system::error_code(e, get_gzip_category());
+			return boost::system::error_code(e, gzip_category());
 		}
 	}
 
@@ -212,9 +217,9 @@ namespace libtorrent
 
 		// start off with 4 kilobytes and grow
 		// if needed
-		boost::uint32_t destlen = 4096;
+		unsigned long destlen = 4096;
 		int ret = 0;
-		boost::uint32_t srclen = size - header_len;
+		unsigned long srclen = size - header_len;
 		in += header_len;
 
 		do

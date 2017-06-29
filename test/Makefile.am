@@ -10,6 +10,7 @@ test_programs = \
   test_file                  \
   test_privacy               \
   test_priority              \
+  test_remove_torrent        \
   test_auto_unchoke          \
   test_checking              \
   test_fast_extension        \
@@ -21,6 +22,7 @@ test_programs = \
   test_receive_buffer        \
   test_resume                \
   test_ssl                   \
+  test_stack_allocator       \
   test_storage               \
   test_time_critical         \
   test_torrent               \
@@ -45,7 +47,8 @@ test_programs = \
   test_enum_net              \
   test_file_progress         \
   test_linked_list           \
-  test_direct_dht
+  test_direct_dht            \
+  test_ed25519
 
 if ENABLE_TESTS
 check_PROGRAMS = $(test_programs) $(benchmark_programs)
@@ -75,6 +78,7 @@ EXTRA_DIST = Jamfile \
   test_torrents/invalid_pieces.torrent \
   test_torrents/invalid_root_hash.torrent \
   test_torrents/invalid_root_hash2.torrent \
+  test_torrents/invalid_symlink.torrent \
   test_torrents/long_name.torrent \
   test_torrents/missing_path_list.torrent \
   test_torrents/missing_piece_len.torrent \
@@ -84,6 +88,7 @@ EXTRA_DIST = Jamfile \
   test_torrents/no_creation_date.torrent \
   test_torrents/no_name.torrent \
   test_torrents/pad_file.torrent \
+  test_torrents/pad_file_no_path.torrent \
   test_torrents/parent_path.torrent \
   test_torrents/root_hash.torrent \
   test_torrents/sample.torrent \
@@ -93,7 +98,9 @@ EXTRA_DIST = Jamfile \
   test_torrents/slash_path3.torrent \
   test_torrents/string.torrent \
   test_torrents/symlink1.torrent \
+  test_torrents/symlink_zero_size.torrent \
   test_torrents/unaligned_pieces.torrent \
+  test_torrents/unordered.torrent \
   test_torrents/url_list.torrent \
   test_torrents/url_list2.torrent \
   test_torrents/url_list3.torrent \
@@ -111,6 +118,7 @@ EXTRA_DIST = Jamfile \
   mutable_test_torrents/test3.torrent \
   mutable_test_torrents/test3_pad_files.torrent \
   zeroes.gz \
+  corrupt.gz \
   utf8_test.txt \
   web_server.py \
   socks.py \
@@ -190,6 +198,7 @@ test_stat_cache_SOURCES = test_stat_cache.cpp
 test_file_SOURCES = test_file.cpp
 test_privacy_SOURCES = test_privacy.cpp
 test_priority_SOURCES = test_priority.cpp
+test_remove_torrent_SOURCES = test_remove_torrent.cpp
 test_auto_unchoke_SOURCES = test_auto_unchoke.cpp
 test_checking_SOURCES = test_checking.cpp
 test_enum_net_SOURCES = test_enum_net.cpp
@@ -203,6 +212,7 @@ test_receive_buffer_SOURCES = test_receive_buffer.cpp
 test_storage_SOURCES = test_storage.cpp
 test_time_critical_SOURCES = test_time_critical.cpp
 test_resume_SOURCES = test_resume.cpp
+test_stack_allocator_SOURCES = test_stack_allocator.cpp
 test_ssl_SOURCES = test_ssl.cpp
 test_torrent_SOURCES = test_torrent.cpp
 test_tracker_SOURCES = test_tracker.cpp
@@ -226,11 +236,12 @@ test_remap_files_SOURCES = test_remap_files.cpp
 test_file_progress_SOURCES = test_file_progress.cpp
 test_linked_list_SOURCES = test_linked_list.cpp
 test_direct_dht_SOURCES = test_direct_dht.cpp
+test_ed25519_SOURCES = test_ed25519.cpp
 
 LDADD = libtest.la $(top_builddir)/src/libtorrent-rasterbar.la
 
 #AM_CXXFLAGS=-ftemplate-depth-50 -I$(top_srcdir)/include -I$(top_srcdir)/include/libtorrent @DEBUGFLAGS@ @PTHREAD_CFLAGS@
-AM_CPPFLAGS=-ftemplate-depth-50 -I$(top_srcdir)/include @DEBUGFLAGS@
+AM_CPPFLAGS=-ftemplate-depth-50 -I$(top_srcdir)/include @DEBUGFLAGS@ @OPENSSL_INCLUDES@
 
 AM_LDFLAGS=@BOOST_SYSTEM_LIB@ @PTHREAD_LIBS@ @OPENSSL_LDFLAGS@ @OPENSSL_LIBS@ \
 	@BOOST_CHRONO_LIB@
