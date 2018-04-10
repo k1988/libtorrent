@@ -138,6 +138,7 @@ void node::update_node_id()
 	m_id = generate_id(m_observer->external_address());
 
 	m_table.update_node_id(m_id);
+	m_rpc.update_node_id(m_id);
 }
 
 bool node::verify_token(std::string const& token, char const* info_hash
@@ -216,9 +217,6 @@ void node::bootstrap(std::vector<udp::endpoint> const& nodes
 #endif
 		r->add_entry(node_id(0), *i, observer::flag_initial);
 	}
-
-	// make us start as far away from our node ID as possible
-	r->trim_seed_nodes();
 
 #ifndef TORRENT_DISABLE_LOGGING
 	if (m_observer)

@@ -38,13 +38,14 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/bencode.hpp"
 #include "libtorrent/torrent_info.hpp" // for announce_entry
 #include "libtorrent/announce_entry.hpp"
+#include "settings.hpp"
 
 using namespace libtorrent;
 namespace lt = libtorrent;
 
 void test_remove_url(std::string url)
 {
-	lt::session s;
+	lt::session s(settings());
 	add_torrent_params p;
 	p.flags &= ~add_torrent_params::flag_paused;
 	p.flags &= ~add_torrent_params::flag_auto_managed;
@@ -76,7 +77,7 @@ TORRENT_TEST(magnet)
 	session_proxy p2;
 
 	// test session state load/restore
-	settings_pack pack;
+	settings_pack pack = settings();
 	pack.set_str(settings_pack::user_agent, "test");
 	pack.set_int(settings_pack::tracker_receive_timeout, 1234);
 	pack.set_int(settings_pack::file_pool_size, 543);
@@ -145,6 +146,8 @@ TORRENT_TEST(magnet)
 
 	trackers = t2.trackers();
 	TEST_EQUAL(trackers.size(), 2);
+	TEST_EQUAL(trackers[0].tier, 0);
+	TEST_EQUAL(trackers[1].tier, 1);
 
 	p.url = "magnet:"
 		"?tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A80"
@@ -161,23 +164,26 @@ TORRENT_TEST(magnet)
 	if (trackers.size() > 0)
 	{
 		TEST_EQUAL(trackers[0].url, "udp://tracker.openbittorrent.com:80");
+		TEST_EQUAL(trackers[0].tier, 0);
 		fprintf(stderr, "1: %s\n", trackers[0].url.c_str());
 	}
 	if (trackers.size() > 1)
 	{
 		TEST_EQUAL(trackers[1].url, "udp://tracker.publicbt.com:80");
+		TEST_EQUAL(trackers[1].tier, 1);
 		fprintf(stderr, "2: %s\n", trackers[1].url.c_str());
 	}
 	if (trackers.size() > 2)
 	{
 		TEST_EQUAL(trackers[2].url, "udp://tracker.ccc.de:80");
+		TEST_EQUAL(trackers[2].tier, 2);
 		fprintf(stderr, "3: %s\n", trackers[2].url.c_str());
 	}
 
 	TEST_EQUAL(to_hex(t.info_hash().to_string()), "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd");
 
 	p1 = s->abort();
-	s.reset(new lt::session());
+	s.reset(new lt::session(settings()));
 
 	std::vector<char> buf;
 	bencode(std::back_inserter(buf), session_state);
@@ -387,5 +393,20 @@ TORRENT_TEST(make_magnet_uri2)
 	std::string magnet = make_magnet_uri(ti);
 	printf("%s len: %d\n", magnet.c_str(), int(magnet.size()));
 	TEST_CHECK(magnet.find("&ws=http%3a%2f%2ffoo.com%2fbar") != std::string::npos);
+}
+
+TORRENT_TEST(trailing_whitespace)
+{
+	session ses(settings());
+	add_torrent_params p;
+	p.save_path = ".";
+	p.url = "magnet:?xt=urn:btih:abaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n";
+	// invalid hash
+	TEST_THROW(ses.add_torrent(p));
+
+	p.url = "magnet:?xt=urn:btih:abaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+	// now it's valid, because there's no trailing whitespace
+	torrent_handle h = ses.add_torrent(p);
+	TEST_CHECK(h.is_valid());
 }
 

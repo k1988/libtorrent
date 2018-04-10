@@ -47,6 +47,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/bdecode.hpp"
 #include "libtorrent/bencode.hpp"
 #include "libtorrent/torrent_info.hpp"
+#include "settings.hpp"
 
 #include <fstream>
 
@@ -55,11 +56,11 @@ namespace lt = libtorrent;
 
 TORRENT_TEST(session)
 {
-	settings_pack p;
+	settings_pack p = settings();
 	p.set_int(settings_pack::alert_mask, ~0);
 	lt::session ses(p);
 
-	settings_pack sett;
+	settings_pack sett = settings();
 	sett.set_int(settings_pack::cache_size, 100);
 	sett.set_int(settings_pack::max_queued_disk_bytes, 1000 * 16 * 1024);
 
@@ -103,7 +104,7 @@ TORRENT_TEST(session)
 
 TORRENT_TEST(load_empty_file)
 {
-	settings_pack p;
+	settings_pack p = settings();
 	p.set_int(settings_pack::alert_mask, ~0);
 	lt::session ses(p);
 
@@ -135,7 +136,7 @@ TORRENT_TEST(session_stats)
 
 TORRENT_TEST(paused_session)
 {
-	lt::session s;
+	lt::session s(settings());
 	s.pause();
 
 	lt::add_torrent_params ps;
@@ -153,6 +154,52 @@ TORRENT_TEST(paused_session)
 	TEST_CHECK(!h.status().paused);
 }
 
+TORRENT_TEST(get_cache_info)
+{
+	lt::session s(settings());
+	lt::cache_status ret;
+	s.get_cache_info(&ret);
+
+	TEST_CHECK(ret.pieces.empty());
+#ifndef TORRENT_NO_DEPRECATE
+	TEST_EQUAL(ret.blocks_written, 0);
+	TEST_EQUAL(ret.writes, 0);
+	TEST_EQUAL(ret.blocks_read, 0);
+	TEST_EQUAL(ret.blocks_read_hit, 0);
+	TEST_EQUAL(ret.reads, 0);
+	TEST_EQUAL(ret.queued_bytes, 0);
+	TEST_EQUAL(ret.cache_size, 0);
+	TEST_EQUAL(ret.write_cache_size, 0);
+	TEST_EQUAL(ret.read_cache_size, 0);
+	TEST_EQUAL(ret.pinned_blocks, 0);
+	TEST_EQUAL(ret.total_used_buffers, 0);
+	TEST_EQUAL(ret.average_read_time, 0);
+	TEST_EQUAL(ret.average_write_time, 0);
+	TEST_EQUAL(ret.average_hash_time, 0);
+	TEST_EQUAL(ret.average_job_time, 0);
+	TEST_EQUAL(ret.cumulative_job_time, 0);
+	TEST_EQUAL(ret.cumulative_read_time, 0);
+	TEST_EQUAL(ret.cumulative_write_time, 0);
+	TEST_EQUAL(ret.cumulative_hash_time, 0);
+	TEST_EQUAL(ret.total_read_back, 0);
+	TEST_EQUAL(ret.read_queue_size, 0);
+	TEST_EQUAL(ret.blocked_jobs, 0);
+	TEST_EQUAL(ret.queued_jobs, 0);
+	TEST_EQUAL(ret.peak_queued, 0);
+	TEST_EQUAL(ret.pending_jobs, 0);
+	TEST_EQUAL(ret.num_jobs, 0);
+	TEST_EQUAL(ret.num_read_jobs, 0);
+	TEST_EQUAL(ret.num_write_jobs, 0);
+	TEST_EQUAL(ret.arc_mru_size, 0);
+	TEST_EQUAL(ret.arc_mru_ghost_size, 0);
+	TEST_EQUAL(ret.arc_mfu_size, 0);
+	TEST_EQUAL(ret.arc_mfu_ghost_size, 0);
+	TEST_EQUAL(ret.arc_write_size, 0);
+	TEST_EQUAL(ret.arc_volatile_size, 0);
+	TEST_EQUAL(ret.num_writing_threads, 0);
+#endif
+}
+
 #if __cplusplus >= 201103L
 
 template <typename Set, typename Save, typename Default, typename Load>
@@ -160,14 +207,14 @@ void test_save_restore(Set setup, Save s, Default d, Load l)
 {
 	entry st;
 	{
-		settings_pack p;
+		settings_pack p = settings();
 		setup(p);
 		lt::session ses(p);
 		s(ses, st);
 	}
 
 	{
-		settings_pack p;
+		settings_pack p = settings();
 		d(p);
 		lt::session ses(p);
 		// the loading function takes a bdecode_node, so we have to transform the
@@ -253,6 +300,56 @@ TORRENT_TEST(save_restore_state_load_filter)
 			settings_pack sett = ses.get_settings();
 			TEST_EQUAL(sett.get_int(settings_pack::cache_size), 90);
 		});
+}
+
+TORRENT_TEST(session_shutdown)
+{
+	lt::settings_pack pack;
+	lt::session ses(pack);
+}
+
+// make sure we don't restore peer_id from session state
+TORRENT_TEST(save_state_peer_id)
+{
+	lt::settings_pack pack;
+	pack.set_str(settings_pack::peer_fingerprint, "AAA");
+	lt::session ses(pack);
+	lt::peer_id const pid1 = ses.id();
+	TEST_CHECK(pid1[0] == 'A');
+	TEST_CHECK(pid1[1] == 'A');
+	TEST_CHECK(pid1[2] == 'A');
+
+	lt::entry st;
+	ses.save_state(st);
+
+	pack.set_str(settings_pack::peer_fingerprint, "foobar");
+	ses.apply_settings(pack);
+
+	lt::peer_id const pid2 = ses.id();
+	TEST_CHECK(pid2[0] == 'f');
+	TEST_CHECK(pid2[1] == 'o');
+	TEST_CHECK(pid2[2] == 'o');
+	TEST_CHECK(pid2[3] == 'b');
+	TEST_CHECK(pid2[4] == 'a');
+	TEST_CHECK(pid2[5] == 'r');
+
+
+	std::vector<char> buf;
+	bencode(std::back_inserter(buf), st);
+	bdecode_node state;
+	error_code ec;
+	int ret = bdecode(buf.data(), buf.data() + buf.size()
+		, state, ec, nullptr, 100, 1000);
+	TEST_EQUAL(ret, 0);
+	ses.load_state(state);
+
+	lt::peer_id const pid3 = ses.id();
+	TEST_CHECK(pid3[0] == 'f');
+	TEST_CHECK(pid3[1] == 'o');
+	TEST_CHECK(pid3[2] == 'o');
+	TEST_CHECK(pid3[3] == 'b');
+	TEST_CHECK(pid3[4] == 'a');
+	TEST_CHECK(pid3[5] == 'r');
 }
 
 #endif

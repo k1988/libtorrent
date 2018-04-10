@@ -195,7 +195,7 @@ void test_stop_start_download(swarm_test type, bool graceful)
 		// on alert
 		, [&](lt::alert const* a, lt::session& ses) {
 
-			if (lt::alert_cast<lt::torrent_added_alert>(a))
+			if (lt::alert_cast<lt::add_torrent_alert>(a))
 				add_extra_peers(ses);
 
 			if (auto tp = lt::alert_cast<lt::torrent_paused_alert>(a))
@@ -308,6 +308,7 @@ TORRENT_TEST(stop_start_seed_graceful)
 	test_stop_start_download(swarm_test::upload, true);
 }
 
+#ifndef TORRENT_NO_DEPRECATE
 TORRENT_TEST(explicit_cache)
 {
 	setup_swarm(2, swarm_test::download
@@ -333,6 +334,7 @@ TORRENT_TEST(explicit_cache)
 			return true;
 		});
 }
+#endif
 
 TORRENT_TEST(shutdown)
 {
@@ -412,6 +414,187 @@ TORRENT_TEST(delete_partfile)
 	printf("expecting \"%s/temporary\" to exist [%s]\n", save_path.c_str()
 		, ec.message().c_str());
 	TEST_CHECK(!ec);
+}
+
+TORRENT_TEST(torrent_completed_alert)
+{
+	int num_file_completed = false;
+
+	setup_swarm(2, swarm_test::download
+		// add session
+		, [](lt::settings_pack& pack)
+		{
+			pack.set_int(lt::settings_pack::alert_mask, alert::progress_notification);
+		}
+		// add torrent
+		, [](lt::add_torrent_params&) {}
+		// on alert
+		, [&](lt::alert const* a, lt::session&)
+		{
+			auto tc = alert_cast<lt::file_completed_alert>(a);
+			if (tc == nullptr) return;
+			++num_file_completed;
+		}
+		// terminate
+		, [](int ticks, lt::session& ses) -> bool
+		{
+			if (ticks > 80)
+			{
+				TEST_ERROR("timeout");
+				return true;
+			}
+			if (!is_seed(ses)) return false;
+			printf("completed in %d ticks\n", ticks);
+			return true;
+		});
+
+	TEST_EQUAL(num_file_completed, 1);
+}
+
+// template for testing running swarms with edge case settings
+template <typename SettingsFun>
+void test_settings(SettingsFun fun)
+{
+	setup_swarm(2, swarm_test::download
+		// add session
+		, fun
+		// add torrent
+		, [](lt::add_torrent_params& params) {}
+		// on alert
+		, [](lt::alert const* a, lt::session& ses) {}
+		// terminate
+		, [](int ticks, lt::session& ses) -> bool
+		{
+			if (ticks > 80)
+			{
+				TEST_ERROR("timeout");
+				return true;
+			}
+			if (!is_seed(ses)) return false;
+			return true;
+		});
+}
+
+TORRENT_TEST(unlimited_connections)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_int(settings_pack::connections_limit, std::numeric_limits<int>::max()); }
+	);
+}
+
+TORRENT_TEST(default_connections_limit)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_int(settings_pack::connections_limit, 0); }
+	);
+}
+
+TORRENT_TEST(default_connections_limit_negative)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_int(settings_pack::connections_limit, -1); }
+	);
+}
+
+
+TORRENT_TEST(redundant_have)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_bool(settings_pack::send_redundant_have, false); }
+	);
+}
+
+TORRENT_TEST(lazy_bitfields)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_bool(settings_pack::lazy_bitfields, true); }
+	);
+}
+
+TORRENT_TEST(prioritize_partial_pieces)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_bool(settings_pack::prioritize_partial_pieces, true); }
+	);
+}
+
+TORRENT_TEST(active_downloads)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_int(settings_pack::active_downloads, std::numeric_limits<int>::max()); }
+	);
+}
+
+TORRENT_TEST(active_seeds)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_int(settings_pack::active_seeds, std::numeric_limits<int>::max()); }
+	);
+}
+
+TORRENT_TEST(active_seeds_negative)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_int(settings_pack::active_seeds, -1); }
+	);
+}
+
+TORRENT_TEST(active_limit)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_int(settings_pack::active_limit, std::numeric_limits<int>::max()); }
+	);
+}
+
+TORRENT_TEST(active_limit_negative)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_int(settings_pack::active_limit, -1); }
+	);
+}
+
+TORRENT_TEST(upload_rate_limit)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_int(settings_pack::upload_rate_limit, std::numeric_limits<int>::max()); }
+	);
+}
+
+TORRENT_TEST(upload_rate_limit_negative)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_int(settings_pack::upload_rate_limit, -1); }
+	);
+}
+
+TORRENT_TEST(download_rate_limit)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_int(settings_pack::download_rate_limit, std::numeric_limits<int>::max()); }
+	);
+}
+
+TORRENT_TEST(download_rate_limit_negative)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_int(settings_pack::download_rate_limit, -1); }
+	);
+}
+
+
+TORRENT_TEST(unchoke_slots_limit)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_int(settings_pack::unchoke_slots_limit, std::numeric_limits<int>::max()); }
+	);
+}
+
+TORRENT_TEST(unchoke_slots_limit_negative)
+{
+	test_settings([](lt::settings_pack& pack) {
+		pack.set_int(settings_pack::unchoke_slots_limit, -1);
+		pack.set_int(settings_pack::choking_algorithm, settings_pack::fixed_slots_choker);
+	});
 }
 
 // TODO: add test that makes sure a torrent in graceful pause mode won't make

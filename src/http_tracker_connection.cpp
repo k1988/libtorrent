@@ -87,7 +87,7 @@ namespace libtorrent
 			std::size_t pos = url.find("announce");
 			if (pos == std::string::npos)
 			{
-				tracker_connection::fail(error_code(errors::scrape_not_available));
+				tracker_connection::fail(errors::scrape_not_available);
 				return;
 			}
 			url.replace(pos, 8, "scrape");
@@ -115,7 +115,7 @@ namespace libtorrent
 
 		if (0 == (tracker_req().kind & tracker_request::scrape_request))
 		{
-			const char* event_string[] = {"completed", "started", "stopped", "paused"};
+			static const char* event_string[] = {"completed", "started", "stopped", "paused"};
 
 			char str[1024];
 			const bool stats = tracker_req().send_stats;
@@ -173,7 +173,7 @@ namespace libtorrent
 			{
 				if (tracker_req().i2pconn->local_endpoint().empty())
 				{
-					fail(error_code(errors::no_i2p_endpoint), -1, "Waiting for i2p acceptor from SAM bridge", 5);
+					fail(errors::no_i2p_endpoint, -1, "Waiting for i2p acceptor from SAM bridge", 5);
 					return;
 				}
 				else
@@ -201,7 +201,7 @@ namespace libtorrent
 			if (!err)
 			{
 				url += "&ipv6=";
-				url += ip;
+				url += escape_string(ip.c_str(), ip.size());
 			}
 		}
 #endif
@@ -216,9 +216,15 @@ namespace libtorrent
 #endif
 			));
 
-		int timeout = tracker_req().event==tracker_request::stopped
+		int const timeout = tracker_req().event==tracker_request::stopped
 			?settings.get_int(settings_pack::stop_tracker_timeout)
 			:settings.get_int(settings_pack::tracker_completion_timeout);
+
+		// in anonymous mode we omit the user agent to mitigate fingerprinting of
+		// the client. Private torrents is an exception because some private
+		// trackers may requre the user agent
+		std::string const user_agent = settings.get_bool(settings_pack::anonymous_mode)
+			&& !tracker_req().private_torrent ? "" : settings.get_str(settings_pack::user_agent);
 
 		// when sending stopped requests, prefer the cached DNS entry
 		// to avoid being blocked for slow or failing responses. Chances
@@ -228,12 +234,10 @@ namespace libtorrent
 		m_tracker_connection->get(url, seconds(timeout)
 			, tracker_req().event == tracker_request::stopped ? 2 : 1
 			, ps.proxy_tracker_connections ? &ps : NULL
-			, 5, settings.get_bool(settings_pack::anonymous_mode)
-				? "" : settings.get_str(settings_pack::user_agent)
-			, bind_interface()
+			, 5, user_agent, bind_interface()
 			, tracker_req().event == tracker_request::stopped
-				? resolver_interface::prefer_cache
-				: resolver_interface::abort_on_shutdown
+				? resolver_interface::cache_only : 0
+				| resolver_interface::abort_on_shutdown
 #ifndef TORRENT_NO_DEPRECATE
 			, tracker_req().auth
 #else
@@ -292,7 +296,7 @@ namespace libtorrent
 		}
 #endif
 		if (endpoints.empty())
-			fail(error_code(errors::banned_by_ip_filter));
+			fail(errors::banned_by_ip_filter);
 	}
 
 	void http_tracker_connection::on_connect(http_connection& c)
@@ -323,7 +327,7 @@ namespace libtorrent
 
 		if (parser.status_code() != 200)
 		{
-			fail(error_code(parser.status_code(), get_http_category())
+			fail(error_code(parser.status_code(), http_category())
 				, parser.status_code(), parser.message().c_str());
 			return;
 		}
@@ -392,7 +396,7 @@ namespace libtorrent
 		// extract peer id (if any)
 		if (info.type() != bdecode_node::dict_t)
 		{
-			ec.assign(errors::invalid_peer_dict, get_libtorrent_category());
+			ec = errors::invalid_peer_dict;
 			return false;
 		}
 		bdecode_node i = info.dict_find_string("peer id");
@@ -410,7 +414,7 @@ namespace libtorrent
 		i = info.dict_find_string("ip");
 		if (i == 0)
 		{
-			ec.assign(errors::invalid_tracker_response, get_libtorrent_category());
+			ec = errors::invalid_tracker_response;
 			return false;
 		}
 		ret.hostname = i.string_value();
@@ -419,7 +423,7 @@ namespace libtorrent
 		i = info.dict_find_int("port");
 		if (i == 0)
 		{
-			ec.assign(errors::invalid_tracker_response, get_libtorrent_category());
+			ec = errors::invalid_tracker_response;
 			return false;
 		}
 		ret.port = boost::uint16_t(i.int_value());
@@ -439,7 +443,7 @@ namespace libtorrent
 
 		if (res != 0 || e.type() != bdecode_node::dict_t)
 		{
-			ec.assign(errors::invalid_tracker_response, get_libtorrent_category());
+			ec = errors::invalid_tracker_response;
 			return resp;
 		}
 
@@ -465,7 +469,7 @@ namespace libtorrent
 		if (failure)
 		{
 			resp.failure_reason = failure.string_value();
-			ec.assign(errors::tracker_failure, get_libtorrent_category());
+			ec = errors::tracker_failure;
 			return resp;
 		}
 
@@ -478,7 +482,7 @@ namespace libtorrent
 			bdecode_node files = e.dict_find_dict("files");
 			if (!files)
 			{
-				ec.assign(errors::invalid_files_entry, get_libtorrent_category());
+				ec = errors::invalid_files_entry;
 				return resp;
 			}
 
@@ -487,7 +491,7 @@ namespace libtorrent
 
 			if (!scrape_data)
 			{
-				ec.assign(errors::invalid_hash_entry, get_libtorrent_category());
+				ec = errors::invalid_hash_entry;
 				return resp;
 			}
 
@@ -592,7 +596,7 @@ namespace libtorrent
 		if (peers_ent == 0 && ipv6_peers == 0
 			&& tracker_req().event != tracker_request::stopped)
 		{
-			ec.assign(errors::invalid_peers_entry, get_libtorrent_category());
+			ec = errors::invalid_peers_entry;
 			return resp;
 		}
 */

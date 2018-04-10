@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 from distutils.core import setup, Extension
-from distutils.sysconfig import get_config_var
+from distutils.sysconfig import get_config_vars
 import os
 import platform
 import sys
@@ -102,8 +102,10 @@ if '--bjam' in sys.argv:
 
 else:
 	# Remove the '-Wstrict-prototypes' compiler option, which isn't valid for C++.
-	os.environ['OPT'] = ' '.join(
-		flag for flag in get_config_var('OPT').split() if flag != '-Wstrict-prototypes')
+	cfg_vars = get_config_vars()
+	for key, value in cfg_vars.items():
+		if isinstance(value, str):
+			cfg_vars[key] = value.replace('-Wstrict-prototypes', '')
 
 	source_list = os.listdir(os.path.join(os.path.dirname(__file__), "src"))
 	source_list = [os.path.abspath(os.path.join(os.path.dirname(__file__), "src", s)) for s in source_list if s.endswith(".cpp")]
@@ -114,8 +116,15 @@ else:
 		extra_link = flags.parse(ldflags)
 		extra_compile = flags.parse(extra_cmd)
 
+		# for some reason distutils uses the CC environment variable to determine
+		# the compiler to use for C++
+		if 'CXX' in os.environ:
+			os.environ['CC'] = os.environ['CXX']
+		if 'CXXFLAGS' in os.environ:
+			os.environ['CFLAGS'] = os.environ['CXXFLAGS']
+
 		ext = [Extension('libtorrent',
-			sources = source_list,
+			sources = sorted(source_list),
 			language='c++',
 			include_dirs = flags.include_dirs,
 			library_dirs = flags.library_dirs,
@@ -124,7 +133,7 @@ else:
 			libraries = ['torrent-rasterbar'] + flags.libraries)]
 
 setup(name = 'python-libtorrent',
-	version = '1.1.0',
+	version = '1.1.3',
 	author = 'Arvid Norberg',
 	author_email = 'arvid@libtorrent.org',
 	description = 'Python bindings for libtorrent-rasterbar',

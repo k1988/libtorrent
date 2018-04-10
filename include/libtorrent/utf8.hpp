@@ -39,6 +39,7 @@ POSSIBILITY OF SUCH DAMAGE.
 // convert_to_native and convert_from_native
 #if TORRENT_USE_WSTRING || defined TORRENT_WINDOWS
 
+#include <boost/cstdint.hpp>
 #include <string>
 #include <cwchar>
 
@@ -73,6 +74,9 @@ namespace libtorrent
 		const std::wstring &wide, std::string &utf8);
 	TORRENT_EXPORT std::string utf8_to_local(std::string const& s);
 	TORRENT_EXPORT std::string local_to_utf8(std::string const &s);
+
+	TORRENT_EXTRA_EXPORT std::pair<boost::int32_t, int>
+		parse_utf8_codepoint(char const* str, int len);
 }
 #endif // !BOOST_NO_STD_WSTRING
 

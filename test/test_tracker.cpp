@@ -200,7 +200,7 @@ TORRENT_TEST(parse_failure_reason)
 	tracker_response resp = parse_tracker_response(response, sizeof(response) - 1
 		, ec, false, sha1_hash());
 
-	TEST_EQUAL(ec, error_code(errors::tracker_failure));
+	TEST_EQUAL(ec, errors::tracker_failure);
 	TEST_EQUAL(resp.peers.size(), 0);
 	TEST_EQUAL(resp.failure_reason, "test message");
 }
@@ -295,34 +295,40 @@ TORRENT_TEST(extract_peer_not_a_dictionary)
 {
 	// not a dictionary
 	peer_entry result = extract_peer("2:ip11:example.com"
-		, error_code(errors::invalid_peer_dict, get_libtorrent_category()), false);
+		, errors::invalid_peer_dict, false);
 }
 
 TORRENT_TEST(extract_peer_missing_ip)
 {
 	// missing IP
 	peer_entry result = extract_peer("d7:peer id20:abababababababababab4:porti1337ee"
-		, error_code(errors::invalid_tracker_response, get_libtorrent_category()), false);
+		, errors::invalid_tracker_response, false);
 }
 
 TORRENT_TEST(extract_peer_missing_port)
 {
 	// missing port
 	peer_entry result = extract_peer("d7:peer id20:abababababababababab2:ip4:abcde"
-		, error_code(errors::invalid_tracker_response, get_libtorrent_category()), false);
+		, errors::invalid_tracker_response, false);
 }
 
-TORRENT_TEST(udp_tracker)
+bool connect_alert(libtorrent::alert const* a, tcp::endpoint& ep)
 {
-	int http_port = start_web_server();
-	int udp_port = start_udp_tracker();
+	if (peer_connect_alert const* pc = alert_cast<peer_connect_alert>(a))
+		ep = pc->ip;
+	return true;
+}
+
+void test_udp_tracker(std::string const& iface, address tracker, tcp::endpoint const& expected_peer)
+{
+	int const udp_port = start_udp_tracker(tracker);
 
 	int prev_udp_announces = num_udp_announces();
 
 	settings_pack pack = settings();
 	pack.set_bool(settings_pack::announce_to_all_trackers, true);
 	pack.set_bool(settings_pack::announce_to_all_tiers, true);
-	pack.set_str(settings_pack::listen_interfaces, "0.0.0.0:48875");
+	pack.set_str(settings_pack::listen_interfaces, iface + ":48875");
 
 	boost::scoped_ptr<lt::session> s(new lt::session(pack));
 
@@ -334,11 +340,8 @@ TORRENT_TEST(udp_tracker)
 	file.close();
 
 	char tracker_url[200];
-	snprintf(tracker_url, sizeof(tracker_url), "http://127.0.0.1:%d/announce", http_port);
+	snprintf(tracker_url, sizeof(tracker_url), "udp://%s:%d/announce", iface.c_str(), udp_port);
 	t->add_tracker(tracker_url, 0);
-
-	snprintf(tracker_url, sizeof(tracker_url), "udp://127.0.0.1:%d/announce", udp_port);
-	t->add_tracker(tracker_url, 1);
 
 	add_torrent_params addp;
 	addp.flags &= ~add_torrent_params::flag_paused;
@@ -348,9 +351,11 @@ TORRENT_TEST(udp_tracker)
 	addp.save_path = "tmp1_tracker";
 	torrent_handle h = s->add_torrent(addp);
 
+	tcp::endpoint peer_ep;
 	for (int i = 0; i < 50; ++i)
 	{
-		print_alerts(*s, "s");
+		print_alerts(*s, "s", false, false, false, boost::bind(&connect_alert, _1, boost::ref(peer_ep)));
+
 		if (num_udp_announces() == prev_udp_announces + 1)
 			break;
 
@@ -370,7 +375,7 @@ TORRENT_TEST(udp_tracker)
 
 	for (int i = 0; i < 50; ++i)
 	{
-		print_alerts(*s, "s", true, true);
+		print_alerts(*s, "s", true, true, false, boost::bind(&connect_alert, _1, boost::ref(peer_ep)));
 		if (num_udp_announces() == prev_udp_announces + 2)
 			break;
 
@@ -379,6 +384,8 @@ TORRENT_TEST(udp_tracker)
 			, int(prev_udp_announces) + 1);
 	}
 
+	TEST_CHECK(peer_ep == expected_peer);
+
 	fprintf(stderr, "destructing session\n");
 	s.reset();
 	fprintf(stderr, "done\n");
@@ -386,6 +393,18 @@ TORRENT_TEST(udp_tracker)
 	// we should have announced the stopped event now
 	TEST_EQUAL(num_udp_announces(), prev_udp_announces + 2);
 }
+
+TORRENT_TEST(udp_tracker_v4)
+{
+	test_udp_tracker("127.0.0.1", address_v4::any(), ep("1.3.3.7", 1337));
+}
+
+#if TORRENT_USE_IPV6
+TORRENT_TEST(udp_tracker_v6)
+{
+	test_udp_tracker("[::1]", address_v6::any(), ep("::1.3.3.7", 1337));
+}
+#endif
 
 TORRENT_TEST(http_peers)
 {
@@ -421,8 +440,15 @@ TORRENT_TEST(http_peers)
 	addp.save_path = "tmp2_tracker";
 	torrent_handle h = s->add_torrent(addp);
 
+	libtorrent::torrent_status status = h.status();
+	TEST_CHECK(status.current_tracker.empty());
+
 	// wait to hit the tracker
 	wait_for_alert(*s, tracker_reply_alert::alert_type, "s");
+
+	status = h.status();
+	TEST_CHECK(!status.current_tracker.empty());
+	TEST_CHECK(status.current_tracker == tracker_url);
 
 	// we expect to have certain peers in our peer list now
 	// these peers are hard coded in web_server.py
@@ -452,6 +478,61 @@ TORRENT_TEST(http_peers)
 
 	fprintf(stderr, "stop_web_server\n");
 	stop_web_server();
+	fprintf(stderr, "done\n");
+}
+
+TORRENT_TEST(current_tracker)
+{
+	// use a invalid tracker port
+	int http_port = 39527;
+
+	settings_pack pack = settings();
+	pack.set_bool(settings_pack::announce_to_all_trackers, true);
+	pack.set_bool(settings_pack::announce_to_all_tiers, false);
+	pack.set_int(settings_pack::tracker_completion_timeout, 2);
+	pack.set_int(settings_pack::tracker_receive_timeout, 1);
+	pack.set_str(settings_pack::listen_interfaces, "0.0.0.0:39775");
+	//pack.set_int(settings_pack::alert_mask, alert::tracker_notification);
+
+	boost::scoped_ptr<lt::session> s(new lt::session(pack));
+
+	error_code ec;
+	remove_all("tmp3_tracker", ec);
+	create_directory("tmp3_tracker", ec);
+	std::ofstream file(combine_path("tmp3_tracker", "temporary").c_str());
+	boost::shared_ptr<torrent_info> t = ::create_torrent(&file, "temporary", 16 * 1024, 13, false);
+	file.close();
+
+	char tracker_url[200];
+	snprintf(tracker_url, sizeof(tracker_url), "http://127.0.0.1:%d/announce"
+		, http_port);
+	t->add_tracker(tracker_url, 0);
+
+	add_torrent_params addp;
+	addp.flags &= ~add_torrent_params::flag_paused;
+	addp.flags &= ~add_torrent_params::flag_auto_managed;
+	addp.flags |= add_torrent_params::flag_seed_mode;
+	addp.ti = t;
+	addp.save_path = "tmp3_tracker";
+	torrent_handle h = s->add_torrent(addp);
+
+	libtorrent::torrent_status status = h.status();
+	TEST_CHECK(status.current_tracker.empty());
+
+	// wait to hit the tracker announce
+	wait_for_alert(*s, tracker_announce_alert::alert_type, "s");
+
+	status = h.status();
+	TEST_CHECK(status.current_tracker.empty());
+
+	// wait to hit the tracker error
+	wait_for_alert(*s, tracker_error_alert::alert_type, "s");
+
+	status = h.status();
+	TEST_CHECK(status.current_tracker.empty());
+
+	fprintf(stderr, "destructing session\n");
+	s.reset();
 	fprintf(stderr, "done\n");
 }
 

@@ -1,3 +1,5 @@
+#include "libtorrent/aux_/disable_warnings_push.hpp"
+
 /* Start: bn_error.c */
 #include "libtorrent/tommath_private.h"
 #ifdef BN_ERROR_C
@@ -6706,7 +6708,7 @@ mp_rand (mp_int * a, int digits)
 
   /* first place a random non-zero digit */
   do {
-    d = ((mp_digit) abs (MP_GEN_RANDOM())) & MP_MASK;
+    d = ((mp_digit) abs (int(MP_GEN_RANDOM()))) & MP_MASK;
   } while (d == 0);
 
   if ((res = mp_add_d (a, d, a)) != MP_OKAY) {
@@ -6718,7 +6720,7 @@ mp_rand (mp_int * a, int digits)
       return res;
     }
 
-    if ((res = mp_add_d (a, ((mp_digit) abs (MP_GEN_RANDOM())), a)) != MP_OKAY) {
+    if ((res = mp_add_d (a, ((mp_digit) abs (int(MP_GEN_RANDOM()))), a)) != MP_OKAY) {
       return res;
     }
   }

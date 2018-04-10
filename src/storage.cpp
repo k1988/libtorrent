@@ -436,9 +436,9 @@ namespace libtorrent
 	void default_storage::set_file_priority(std::vector<boost::uint8_t> const& prio, storage_error& ec)
 	{
 		// extend our file priorities in case it's truncated
-		// the default assumed priority is 1
+		// the default assumed priority is 4 (the default)
 		if (prio.size() > m_file_priority.size())
-			m_file_priority.resize(prio.size(), 1);
+			m_file_priority.resize(prio.size(), 4);
 
 		file_storage const& fs = files();
 		for (int i = 0; i < int(prio.size()); ++i)
@@ -515,16 +515,19 @@ namespace libtorrent
 		// don't do full file allocations on network drives
 #if TORRENT_USE_WSTRING
 		std::wstring f = convert_to_wstring(m_save_path);
-		int drive_type = GetDriveTypeW(f.c_str());
+		int const drive_type = GetDriveTypeW(f.c_str());
 #else
-		int drive_type = GetDriveTypeA(m_save_path.c_str());
+		int const drive_type = GetDriveTypeA(m_save_path.c_str());
 #endif
 
 		if (drive_type == DRIVE_REMOTE)
 			m_allocate_files = false;
 #endif
 
+		{
+			mutex::scoped_lock l(m_file_created_mutex);
 		m_file_created.resize(files().num_files(), false);
+		}
 
 		// first, create all missing directories
 		std::string last_path;
@@ -546,7 +549,11 @@ namespace libtorrent
 				file_status s;
 				std::string file_path = files().file_path(file_index, m_save_path);
 				stat_file(file_path, &s, ec.ec);
-				if (ec && ec.ec != boost::system::errc::no_such_file_or_directory)
+				if (!ec)
+				{
+					m_stat_cache.set_cache(file_index, s.file_size, s.mtime);
+				}
+				else if (ec.ec != boost::system::errc::no_such_file_or_directory)
 				{
 					m_stat_cache.set_error(file_index);
 					ec.file = file_index;
@@ -586,7 +593,7 @@ namespace libtorrent
 					| file::random_access, ec);
 				if (ec) return;
 
-				boost::int64_t size = files().file_size(file_index);
+				boost::int64_t const size = files().file_size(file_index);
 				f->set_size(size, ec.ec);
 				if (ec)
 				{
@@ -600,7 +607,7 @@ namespace libtorrent
 					}
 					break;
 				}
-				size_t mtime = m_stat_cache.get_filetime(file_index);
+				size_t const mtime = m_stat_cache.get_filetime(file_index);
 				m_stat_cache.set_cache(file_index, size, mtime);
 			}
 			ec.ec.clear();
@@ -632,12 +639,15 @@ namespace libtorrent
 				file_path = files().file_path(i, m_save_path);
 				stat_file(file_path, &s, ec.ec);
 				boost::int64_t r = s.file_size;
-				if (ec.ec || !(s.mode & file_status::regular_file)) r = -1;
+				if (ec.ec || !(s.mode & file_status::regular_file))
+				{
+					r = stat_cache::cache_error;
+				}
 
 				if (ec && ec.ec == boost::system::errc::no_such_file_or_directory)
 				{
 					ec.ec.clear();
-					r = -3;
+					r = stat_cache::no_exist;
 				}
 				m_stat_cache.set_cache(i, r, s.mtime);
 
@@ -806,8 +816,8 @@ namespace libtorrent
 			typedef std::set<std::string>::iterator iter_t;
 			for (int i = 0; i < files().num_files(); ++i)
 			{
-				std::string fp = files().file_path(i);
-				bool complete = is_complete(fp);
+				std::string const fp = files().file_path(i);
+				bool const complete = files().file_absolute_path(i);
 				std::string p = complete ? fp : combine_path(m_save_path, fp);
 				if (!complete)
 				{
@@ -876,7 +886,7 @@ namespace libtorrent
 		{
 			boost::int64_t file_size = 0;
 			time_t file_time = 0;
-			boost::int64_t cache_state = m_stat_cache.get_filesize(i);
+			boost::int64_t const cache_state = m_stat_cache.get_filesize(i);
 			if (cache_state != stat_cache::not_in_cache)
 			{
 				if (cache_state >= 0)
@@ -894,6 +904,7 @@ namespace libtorrent
 				{
 					file_size = s.file_size;
 					file_time = s.mtime;
+					m_stat_cache.set_cache(i, file_size, file_time);
 				}
 				else if (error == error_code(boost::system::errc::no_such_file_or_directory
 					, generic_category()))
@@ -908,6 +919,21 @@ namespace libtorrent
 					m_stat_cache.set_error(i);
 				}
 			}
+#if TORRENT_USE_INVARIANT_CHECKS
+			{
+				file_status s;
+				error_code error;
+				stat_file(fs.file_path(i, m_save_path), &s, error);
+				if (s.file_size >= 0 && !error)
+				{
+					TORRENT_ASSERT(s.file_size == file_size);
+				}
+				else
+				{
+					TORRENT_ASSERT(file_size == 0);
+				}
+			}
+#endif
 
 			fl.push_back(entry(entry::list_t));
 			entry::list_type& p = fl.back().list();
@@ -1008,6 +1034,14 @@ namespace libtorrent
 		for (int i = 0; i < file_sizes_ent.list_size(); ++i)
 		{
 			if (fs.pad_file_at(i)) continue;
+
+			// files with priority zero may not have been saved to disk at their
+			// expected location, but is likely to be in a partfile. Just exempt it
+			// from checking
+			if (i < int(m_file_priority.size())
+				&& m_file_priority[i] == 0)
+				continue;
+
 			bdecode_node e = file_sizes_ent.list_at(i);
 			if (e.type() != bdecode_node::list_t
 				|| e.list_size() < 2
@@ -1135,32 +1169,32 @@ namespace libtorrent
 		return true;
 	}
 
-	int default_storage::move_storage(std::string const& sp, int flags, storage_error& ec)
+	int default_storage::move_storage(std::string const& sp, int const flags
+		, storage_error& ec)
 	{
 		int ret = piece_manager::no_error;
-		std::string save_path = complete(sp);
+		std::string const save_path = complete(sp);
 
 		// check to see if any of the files exist
-		error_code e;
 		file_storage const& f = files();
 
-		file_status s;
 		if (flags == fail_if_exist)
 		{
-			stat_file(save_path, &s, e);
-			if (e != boost::system::errc::no_such_file_or_directory)
+			file_status s;
+			error_code err;
+			stat_file(save_path, &s, err);
+			if (err != boost::system::errc::no_such_file_or_directory)
 			{
 				// the directory exists, check all the files
 				for (int i = 0; i < f.num_files(); ++i)
 				{
 					// files moved out to absolute paths are ignored
-					if (is_complete(f.file_path(i))) continue;
+					if (f.file_absolute_path(i)) continue;
 
-					std::string new_path = f.file_path(i, save_path);
-					stat_file(new_path, &s, e);
-					if (e != boost::system::errc::no_such_file_or_directory)
+					stat_file(f.file_path(i, save_path), &s, err);
+					if (err != boost::system::errc::no_such_file_or_directory)
 					{
-						ec.ec = e;
+						ec.ec = err;
 						ec.file = i;
 						ec.operation = storage_error::stat;
 						return piece_manager::file_exist;
@@ -1169,38 +1203,29 @@ namespace libtorrent
 			}
 		}
 
-		// collect all directories in to_move. This is because we
-		// try to move entire directories by default (instead of
-		// files independently).
-		std::map<std::string, int> to_move;
-		for (int i = 0; i < f.num_files(); ++i)
 		{
-			// files moved out to absolute paths are not moved
-			if (is_complete(f.file_path(i))) continue;
-
-			std::string split = split_path(f.file_path(i));
-			to_move.insert(to_move.begin(), std::make_pair(split, i));
-		}
-
-		e.clear();
-		stat_file(save_path, &s, e);
-		if (e == boost::system::errc::no_such_file_or_directory)
+			file_status s;
+			error_code err;
+			stat_file(save_path, &s, err);
+			if (err == boost::system::errc::no_such_file_or_directory)
 		{
-			create_directories(save_path, e);
-			if (e)
+				err.clear();
+				create_directories(save_path, err);
+				if (err)
 			{
-				ec.ec = e;
+					ec.ec = err;
 				ec.file = -1;
 				ec.operation = storage_error::mkdir;
 				return piece_manager::fatal_disk_error;
 			}
 		}
-		else if (e)
+			else if (err)
 		{
-			ec.ec = e;
+				ec.ec = err;
 			ec.file = -1;
-			ec.operation = storage_error::mkdir;
+				ec.operation = storage_error::stat;
 			return piece_manager::fatal_disk_error;
+		}
 		}
 
 		m_pool.release(this);
@@ -1209,85 +1234,134 @@ namespace libtorrent
 		print_open_files("release files", m_files.name().c_str());
 #endif
 
-		for (std::map<std::string, int>::const_iterator i = to_move.begin()
-			, end(to_move.end()); i != end; ++i)
-		{
-			std::string old_path = combine_path(m_save_path, i->first);
-			std::string new_path = combine_path(save_path, i->first);
+		// indices of all files we ended up copying. These need to be deleted
+		// later
+		std::vector<bool> copied_files(f.num_files(), false);
 
-			e.clear();
-			rename(old_path, new_path, e);
+		int i;
+		error_code e;
+		for (i = 0; i < f.num_files(); ++i)
+		{
+			// files moved out to absolute paths are not moved
+			if (f.file_absolute_path(i)) continue;
+
+			std::string const old_path = combine_path(m_save_path, f.file_path(i));
+			std::string const new_path = combine_path(save_path, f.file_path(i));
+
+			if (flags == dont_replace && exists(new_path))
+			{
+				if (ret == piece_manager::no_error) ret = piece_manager::need_full_check;
+				// this is a new file, clear our cached version
+				m_stat_cache.set_dirty(i);
+				continue;
+			}
+
+			// TODO: ideally, if we end up copying files because of a move across
+			// volumes, the source should not be deleted until they've all been
+			// copied. That would let us rollback with higher confidence.
+			move_file(old_path, new_path, e);
+
 			// if the source file doesn't exist. That's not a problem
 			// we just ignore that file
 			if (e == boost::system::errc::no_such_file_or_directory)
+			{
 				e.clear();
-
+				// the source file doesn't exist, but it may exist at the
+				// destination, we don't know.
+				m_stat_cache.set_dirty(i);
+			}
+			else if (e
+				&& e != boost::system::errc::invalid_argument
+				&& e != boost::system::errc::permission_denied)
+			{
+				// moving the file failed
 			// on OSX, the error when trying to rename a file across different
 			// volumes is EXDEV, which will make it fall back to copying.
+				e.clear();
+				copy_file(old_path, new_path, e);
+				if (!e) copied_files[i] = true;
+			}
 
 			if (e)
 			{
-				if (flags == dont_replace && e == boost::system::errc::file_exists)
-				{
-					if (ret == piece_manager::no_error) ret = piece_manager::need_full_check;
-					continue;
-				}
-
-				if (e == boost::system::errc::invalid_argument
-					|| e == boost::system::errc::permission_denied)
-				{
 					ec.ec = e;
-					ec.file = i->second;
+				ec.file = i;
 					ec.operation = storage_error::rename;
 					break;
 				}
+		}
 
-				if (e != boost::system::errc::no_such_file_or_directory)
+		if (!e && m_part_file)
 				{
-					e.clear();
-					recursive_copy(old_path, new_path, ec.ec);
-					if (ec.ec == boost::system::errc::no_such_file_or_directory)
+			m_part_file->move_partfile(save_path, e);
+			if (e)
 					{
-						// it's a bit weird that rename() would not return
-						// ENOENT, but the file still wouldn't exist. But,
-						// in case it does, we're done.
-						ec.ec.clear();
-						break;
+				ec.ec = e;
+				ec.file = -1;
+				ec.operation = storage_error::partfile_move;
 					}
-					if (ec)
+		}
+
+		if (e)
 					{
-						ec.file = i->second;
-						ec.operation = storage_error::copy;
+			// rollback
+			while (--i >= 0)
+			{
+				// files moved out to absolute paths are not moved
+				if (f.file_absolute_path(i)) continue;
+
+				// if we ended up copying the file, don't do anything during
+				// roll-back
+				if (copied_files[i]) continue;
+
+				std::string const old_path = combine_path(m_save_path, f.file_path(i));
+				std::string const new_path = combine_path(save_path, f.file_path(i));
+
+				// ignore errors when rolling back
+				error_code ignore;
+				move_file(new_path, old_path, ignore);
 					}
-					else
+
+			return piece_manager::fatal_disk_error;
+		}
+
+		std::string const old_save_path = m_save_path;
+		m_save_path = save_path;
+
+		std::set<std::string> subdirs;
+		for (i = 0; i < f.num_files(); ++i)
 					{
+			// files moved out to absolute paths are not moved
+			if (f.file_absolute_path(i)) continue;
+
+			if (has_parent_path(f.file_path(i)))
+				subdirs.insert(parent_path(f.file_path(i)));
+
+			// if we ended up renaming the file instead of moving it, there's no
+			// need to delete the source.
+			if (copied_files[i] == false) continue;
+
+			std::string const old_path = combine_path(old_save_path, f.file_path(i));
+
+			// we may still have some files in old old_save_path
+			// eg. if (flags == dont_replace && exists(new_path))
 						// ignore errors when removing
 						error_code ignore;
-						remove_all(old_path, ignore);
+			remove(old_path, ignore);
 					}
-					break;
-				}
-			}
-		}
 
-		if (!ec)
+		for (std::set<std::string>::iterator it(subdirs.begin())
+			, end(subdirs.end()); it != end; ++it)
 		{
-			if (m_part_file)
+			error_code err;
+			std::string subdir = combine_path(old_save_path, *it);
+			while (subdir != old_save_path && !err)
 			{
-				// TODO: if everything moves OK, except for the partfile
-				// we currently won't update the save path, which breaks things.
-				// it would probably make more sense to give up on the partfile
-				m_part_file->move_partfile(save_path, ec.ec);
-				if (ec)
-				{
-					ec.file = -1;
-					ec.operation = storage_error::partfile_move;
-					return piece_manager::fatal_disk_error;
+				remove(subdir, err);
+				subdir = parent_path(subdir);
 				}
 			}
 
-			m_save_path = save_path;
-		}
 		return ret;
 	}
 
@@ -1442,6 +1516,7 @@ namespace libtorrent
 
 		if (m_allocate_files && (mode & file::rw_mask) != file::read_only)
 		{
+			mutex::scoped_lock l(m_file_created_mutex);
 			if (m_file_created.size() != files().num_files())
 				m_file_created.resize(files().num_files(), false);
 
@@ -1452,9 +1527,11 @@ namespace libtorrent
 			// the file right away, to allocate it on the filesystem.
 			if (m_file_created[file] == false)
 			{
-				error_code e;
-				h->set_size(files().file_size(file), e);
 				m_file_created.set_bit(file);
+				l.unlock();
+				error_code e;
+				boost::int64_t const size = files().file_size(file);
+				h->set_size(size, e);
 				if (e)
 				{
 					ec.ec = e;
@@ -1462,6 +1539,7 @@ namespace libtorrent
 					ec.operation = storage_error::fallocate;
 					return h;
 				}
+				m_stat_cache.set_dirty(file);
 			}
 		}
 		return h;

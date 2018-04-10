@@ -86,16 +86,47 @@ web_peer_connection::web_peer_connection(peer_connection_args const& pack
 	shared_ptr<torrent> tor = pack.tor.lock();
 	TORRENT_ASSERT(tor);
 
-	// we always prefer downloading 1 MiB chunks
-	// from web seeds, or whole pieces if pieces
-	// are larger than a MiB
-	int preferred_size = 1024 * 1024;
+	// if the web server is known not to support keep-alive. request 4MiB
+	// but we want to have at least piece size to prevent block based requests
+	int const min_size = std::max((web.supports_keepalive ? 1 : 4) * 1024 * 1024,
+		tor->torrent_file().piece_length());
 
-	// if the web server is known not to support keep-alive.
-	// request even larger blocks at a time
-	if (!web.supports_keepalive) preferred_size *= 4;
+	// we prefer downloading large chunks from web seeds,
+	// but still want to be able to split requests
+	int const preferred_size = std::max(min_size, m_settings.get_int(settings_pack::urlseed_max_request_bytes));
 
-	prefer_contiguous_blocks((std::max)(preferred_size / tor->block_size(), 1));
+	prefer_contiguous_blocks(preferred_size / tor->block_size());
+
+	boost::shared_ptr<torrent> t = associated_torrent().lock();
+	bool const single_file_request = t->torrent_file().num_files() == 1;
+
+	if (!single_file_request)
+	{
+		// handle incorrect .torrent files which are multi-file
+		// but have web seeds not ending with a slash
+		if (m_path.empty() || m_path[m_path.size()-1] != '/') m_path += '/';
+		if (m_url.empty() || m_url[m_url.size()-1] != '/') m_url += '/';
+	}
+	else
+	{
+		// handle .torrent files that don't include the filename in the url
+		if (m_path.empty()) m_path += '/';
+		if (m_path[m_path.size()-1] == '/')
+		{
+			std::string const& name = t->torrent_file().name();
+			m_path += escape_string(name.c_str(), name.size());
+		}
+
+		if (!m_url.empty() && m_url[m_url.size() - 1] == '/')
+		{
+			std::string tmp = t->torrent_file().files().file_path(0);
+#ifdef TORRENT_WINDOWS
+			convert_path_to_posix(tmp);
+#endif
+			tmp = escape_path(tmp.c_str(), tmp.size());
+			m_url += tmp;
+		}
+	}
 
 	// we want large blocks as well, so
 	// we can request more bytes at once
@@ -232,37 +263,6 @@ void web_peer_connection::write_request(peer_request const& r)
 
 	TORRENT_ASSERT(t->valid_metadata());
 
-	bool single_file_request = t->torrent_file().num_files() == 1;
-
-	if (!single_file_request)
-	{
-		// handle incorrect .torrent files which are multi-file
-		// but have web seeds not ending with a slash
-		if (m_path.empty() || m_path[m_path.size() - 1] != '/') m_path += "/";
-		if (m_url.empty() || m_url[m_url.size() - 1] != '/') m_url += "/";
-	}
-	else
-	{
-		// handle .torrent files that don't include the filename in the url
-		if (m_path.empty()) m_path += "/" + t->torrent_file().name();
-		else if (m_path[m_path.size() - 1] == '/')
-		{
-			std::string tmp = t->torrent_file().files().file_path(0);
-#ifdef TORRENT_WINDOWS
-			convert_path_to_posix(tmp);
-#endif
-			m_path += tmp;
-		}
-		else if (!m_url.empty() && m_url[m_url.size() - 1] == '/')
-		{
-			std::string tmp = t->torrent_file().files().file_path(0);
-#ifdef TORRENT_WINDOWS
-			convert_path_to_posix(tmp);
-#endif
-			m_url += tmp;
-		}
-	}
-
 	torrent_info const& info = t->torrent_file();
 	peer_request req = r;
 
@@ -315,8 +315,9 @@ void web_peer_connection::write_request(peer_request const& r)
 		size -= pr.length;
 	}
 
-	int proxy_type = m_settings.get_int(settings_pack::proxy_type);
-	bool using_proxy = (proxy_type == settings_pack::http
+	bool const single_file_request = t->torrent_file().num_files() == 1;
+	int const proxy_type = m_settings.get_int(settings_pack::proxy_type);
+	bool const using_proxy = (proxy_type == settings_pack::http
 		|| proxy_type == settings_pack::http_pw) && !m_ssl;
 
 	// the number of pad files that have been "requested". In case we _only_
@@ -637,7 +638,7 @@ void web_peer_connection::handle_error(int bytes_left)
 			, error_msg);
 	}
 	received_bytes(0, bytes_left);
-	disconnect(error_code(m_parser.status_code(), get_http_category()), op_bittorrent, 1);
+	disconnect(error_code(m_parser.status_code(), http_category()), op_bittorrent, 1);
 	return;
 }
 
@@ -660,9 +661,8 @@ void web_peer_connection::handle_redirect(int bytes_left)
 		return;
 	}
 
-	bool single_file_request = false;
-	if (!m_path.empty() && m_path[m_path.size() - 1] != '/')
-		single_file_request = true;
+	bool const single_file_request = !m_path.empty()
+		&& m_path[m_path.size() - 1] != '/';
 
 	// add the redirected url and remove the current one
 	if (!single_file_request)
@@ -1053,9 +1053,16 @@ void web_peer_connection::incoming_payload(char const* buf, int len)
 				, "piece: %d start: %d len: %d"
 				, front_request.piece, front_request.start, front_request.length);
 #endif
+
+			// Make a copy of the request and pop it off the queue before calling
+			// incoming_piece because that may lead to a call to disconnect()
+			// which will clear the request queue and invalidate any references
+			// to the request
+			peer_request const front_request_copy = front_request;
 			m_requests.pop_front();
 
-			incoming_piece(front_request, &m_piece[0]);
+			incoming_piece(front_request_copy, &m_piece[0]);
+
 			m_piece.clear();
 		}
 	}

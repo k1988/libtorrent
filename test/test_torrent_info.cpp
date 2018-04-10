@@ -131,6 +131,9 @@ static test_torrent_t test_torrents[] =
 	{ "invalid_name2.torrent" },
 	{ "invalid_name3.torrent" },
 	{ "symlink1.torrent" },
+	{ "unordered.torrent" },
+	{ "symlink_zero_size.torrent" },
+	{ "pad_file_no_path.torrent" },
 };
 
 struct test_failing_torrent_t
@@ -150,13 +153,14 @@ test_failing_torrent_t test_error_torrents[] =
 	{ "string.torrent", errors::torrent_is_no_dict },
 	{ "negative_size.torrent", errors::torrent_invalid_length },
 	{ "negative_file_size.torrent", errors::torrent_invalid_length },
-	{ "invalid_path_list.torrent", errors::torrent_missing_name},
+	{ "invalid_path_list.torrent", errors::torrent_invalid_name},
 	{ "missing_path_list.torrent", errors::torrent_missing_name },
 	{ "invalid_pieces.torrent", errors::torrent_missing_pieces },
 	{ "unaligned_pieces.torrent", errors::torrent_invalid_hashes },
 	{ "invalid_root_hash.torrent", errors::torrent_invalid_hashes },
 	{ "invalid_root_hash2.torrent", errors::torrent_missing_pieces },
 	{ "invalid_file_size.torrent", errors::torrent_invalid_length },
+	{ "invalid_symlink.torrent", errors::torrent_invalid_name },
 };
 
 // TODO: test remap_files
@@ -167,7 +171,6 @@ test_failing_torrent_t test_error_torrents[] =
 // TODO: torrent with 'l' (symlink) attribute
 // TODO: creating a merkle torrent (torrent_info::build_merkle_list)
 // TODO: torrent with multiple trackers in multiple tiers, making sure we shuffle them (how do you test shuffling?, load it multiple times and make sure it's in different order at least once)
-// TODO: torrents with a missing name
 // TODO: torrents with a zero-length name
 // TODO: torrents with a merkle tree and add_merkle_nodes
 // TODO: torrent with a non-dictionary info-section
@@ -465,7 +468,7 @@ TORRENT_TEST(sanitize_path)
 	// 5-byte utf-8 sequence (not allowed)
 	path.clear();
 	sanitize_append_path_element(path, "filename\xf8\x9f\x9f\x9f\x9f" "foobar", 19);
-	TEST_EQUAL(path, "filename_____foobar");
+	TEST_EQUAL(path, "filename_foobar");
 
 	// redundant (overlong) 2-byte sequence
 	// ascii code 0x2e encoded with a leading 0
@@ -484,6 +487,23 @@ TORRENT_TEST(sanitize_path)
 	path.clear();
 	sanitize_append_path_element(path, "filename\xf0\x80\x80\xae", 12);
 	TEST_EQUAL(path, "filename_");
+
+	// a filename where every character is filtered is not replaced by an understcore
+	path.clear();
+	sanitize_append_path_element(path, "//\\", 3);
+	TEST_EQUAL(path, "");
+
+	// make sure suspicious unicode characters are filtered out
+	path.clear();
+	// that's utf-8 for U+200e LEFT-TO-RIGHT MARK
+	sanitize_append_path_element(path, "foo\xe2\x80\x8e" "bar", 9);
+	TEST_EQUAL(path, "foobar");
+
+	// make sure suspicious unicode characters are filtered out
+	path.clear();
+	// that's utf-8 for U+202b RIGHT-TO-LEFT EMBEDDING
+	sanitize_append_path_element(path, "foo\xe2\x80\xab" "bar", 9);
+	TEST_EQUAL(path, "foobar");
 }
 
 TORRENT_TEST(verify_encoding)
@@ -500,70 +520,70 @@ TORRENT_TEST(verify_encoding)
 	// valid 2-byte sequence
 	test = "filename\xc2\xa1";
 	TEST_CHECK(verify_encoding(test));
-	fprintf(stderr, "%s\n", test.c_str());
+	fprintf(stdout, "%s\n", test.c_str());
 	TEST_CHECK(test == "filename\xc2\xa1");
 
 	// truncated 2-byte sequence
 	test = "filename\xc2";
 	TEST_CHECK(!verify_encoding(test));
-	fprintf(stderr, "%s\n", test.c_str());
+	fprintf(stdout, "%s\n", test.c_str());
 	TEST_CHECK(test == "filename_");
 
 	// valid 3-byte sequence
 	test = "filename\xe2\x9f\xb9";
 	TEST_CHECK(verify_encoding(test));
-	fprintf(stderr, "%s\n", test.c_str());
+	fprintf(stdout, "%s\n", test.c_str());
 	TEST_CHECK(test == "filename\xe2\x9f\xb9");
 
 	// truncated 3-byte sequence
 	test = "filename\xe2\x9f";
 	TEST_CHECK(!verify_encoding(test));
-	fprintf(stderr, "%s\n", test.c_str());
+	fprintf(stdout, "%s\n", test.c_str());
 	TEST_CHECK(test == "filename_");
 
 	// truncated 3-byte sequence
 	test = "filename\xe2";
 	TEST_CHECK(!verify_encoding(test));
-	fprintf(stderr, "%s\n", test.c_str());
+	fprintf(stdout, "%s\n", test.c_str());
 	TEST_CHECK(test == "filename_");
 
 	// valid 4-byte sequence
 	test = "filename\xf0\x9f\x92\x88";
 	TEST_CHECK(verify_encoding(test));
-	fprintf(stderr, "%s\n", test.c_str());
+	fprintf(stdout, "%s\n", test.c_str());
 	TEST_CHECK(test == "filename\xf0\x9f\x92\x88");
 
 	// truncated 4-byte sequence
 	test = "filename\xf0\x9f\x92";
 	TEST_CHECK(!verify_encoding(test));
-	fprintf(stderr, "%s\n", test.c_str());
+	fprintf(stdout, "%s\n", test.c_str());
 	TEST_CHECK(test == "filename_");
 
 	// 5-byte utf-8 sequence (not allowed)
 	test = "filename\xf8\x9f\x9f\x9f\x9f""foobar";
 	TEST_CHECK(!verify_encoding(test));
-	fprintf(stderr, "%s\n", test.c_str());
+	fprintf(stdout, "%s\n", test.c_str());
 	TEST_CHECK(test == "filename_____foobar");
 
 	// redundant (overlong) 2-byte sequence
 	// ascii code 0x2e encoded with a leading 0
 	test = "filename\xc0\xae";
 	TEST_CHECK(!verify_encoding(test));
-	fprintf(stderr, "%s\n", test.c_str());
+	fprintf(stdout, "%s\n", test.c_str());
 	TEST_CHECK(test == "filename__");
 
 	// redundant (overlong) 3-byte sequence
 	// ascii code 0x2e encoded with two leading 0s
 	test = "filename\xe0\x80\xae";
 	TEST_CHECK(!verify_encoding(test));
-	fprintf(stderr, "%s\n", test.c_str());
+	fprintf(stdout, "%s\n", test.c_str());
 	TEST_CHECK(test == "filename___");
 
 	// redundant (overlong) 4-byte sequence
 	// ascii code 0x2e encoded with three leading 0s
 	test = "filename\xf0\x80\x80\xae";
 	TEST_CHECK(!verify_encoding(test));
-	fprintf(stderr, "%s\n", test.c_str());
+	fprintf(stdout, "%s\n", test.c_str());
 	TEST_CHECK(test == "filename____");
 }
 
@@ -615,12 +635,12 @@ TORRENT_TEST(parse_torrents)
 	std::string root_dir = parent_path(current_working_directory());
 	for (int i = 0; i < int(sizeof(test_torrents)/sizeof(test_torrents[0])); ++i)
 	{
-		fprintf(stderr, "loading %s\n", test_torrents[i].file);
+		fprintf(stdout, "loading %s\n", test_torrents[i].file);
 		std::string filename = combine_path(combine_path(root_dir, "test_torrents")
 			, test_torrents[i].file);
 		boost::shared_ptr<torrent_info> ti(new torrent_info(filename, ec));
 		TEST_CHECK(!ec);
-		if (ec) fprintf(stderr, " loading(\"%s\") -> failed %s\n", filename.c_str()
+		if (ec) fprintf(stdout, " loading(\"%s\") -> failed %s\n", filename.c_str()
 			, ec.message().c_str());
 
 		if (std::string(test_torrents[i].file) == "whitespace_url.torrent")
@@ -717,6 +737,16 @@ TORRENT_TEST(parse_torrents)
 			TEST_EQUAL(ti->num_files(), 1);
 			TEST_EQUAL(ti->files().file_path(0), "temp....abc");
 		}
+		else if (std::string(test_torrents[i].file) == "symlink_zero_size.torrent")
+		{
+			TEST_EQUAL(ti->num_files(), 2);
+			TEST_EQUAL(ti->files().symlink(1), combine_path("foo", "bar"));
+		}
+		else if (std::string(test_torrents[i].file) == "pad_file_no_path.torrent")
+		{
+			TEST_EQUAL(ti->num_files(), 2);
+			TEST_EQUAL(ti->files().file_path(1), combine_path(".pad", "0"));
+		}
 
 		file_storage const& fs = ti->files();
 		for (int i = 0; i < fs.num_files(); ++i)
@@ -724,7 +754,7 @@ TORRENT_TEST(parse_torrents)
 			int first = ti->map_file(i, 0, 0).piece;
 			int last = ti->map_file(i, (std::max)(fs.file_size(i)-1, boost::int64_t(0)), 0).piece;
 			int flags = fs.file_flags(i);
-			fprintf(stderr, "  %11" PRId64 " %c%c%c%c [ %4d, %4d ] %7u %s %s %s%s\n"
+			fprintf(stdout, "  %11" PRId64 " %c%c%c%c [ %4d, %4d ] %7u %s %s %s%s\n"
 				, fs.file_size(i)
 				, (flags & file_storage::flag_pad_file)?'p':'-'
 				, (flags & file_storage::flag_executable)?'x':'-'
@@ -756,12 +786,13 @@ TORRENT_TEST(parse_torrents)
 	for (int i = 0; i < int(sizeof(test_error_torrents)/sizeof(test_error_torrents[0])); ++i)
 	{
 		error_code ec;
-		fprintf(stderr, "loading %s\n", test_error_torrents[i].file);
+		fprintf(stdout, "loading %s\n", test_error_torrents[i].file);
 		boost::shared_ptr<torrent_info> ti(new torrent_info(combine_path(
 			combine_path(root_dir, "test_torrents"), test_error_torrents[i].file), ec));
-		fprintf(stderr, "E:        \"%s\"\nexpected: \"%s\"\n", ec.message().c_str()
+		fprintf(stdout, "E:        \"%s\"\nexpected: \"%s\"\n", ec.message().c_str()
 			, test_error_torrents[i].error.message().c_str());
 		TEST_CHECK(ec.message() == test_error_torrents[i].error.message());
+		TEST_EQUAL(ti->is_valid(), false);
 	}
 }
 
@@ -848,7 +879,7 @@ void test_resolve_duplicates(int test_case)
 	{
 		std::string p = ti.files().file_path(i);
 		convert_path_to_posix(p);
-		fprintf(stderr, "%s == %s\n", p.c_str(), filenames[test_case][i]);
+		fprintf(stdout, "%s == %s\n", p.c_str(), filenames[test_case][i]);
 
 		TEST_EQUAL(p, filenames[test_case][i]);
 	}
@@ -907,7 +938,7 @@ TORRENT_TEST(copy)
 		std::string p = a->files().file_path(i);
 		convert_path_to_posix(p);
 		TEST_EQUAL(p, expected_files[i]);
-		fprintf(stderr, "%s\n", p.c_str());
+		fprintf(stdout, "%s\n", p.c_str());
 
 		TEST_EQUAL(a->files().hash(i), file_hashes[i]);
 	}
@@ -929,7 +960,7 @@ TORRENT_TEST(copy)
 		std::string p = b->files().file_path(i);
 		convert_path_to_posix(p);
 		TEST_EQUAL(p, expected_files[i]);
-		fprintf(stderr, "%s\n", p.c_str());
+		fprintf(stdout, "%s\n", p.c_str());
 
 		TEST_EQUAL(b->files().hash(i), file_hashes[i]);
 	}

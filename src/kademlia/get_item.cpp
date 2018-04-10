@@ -78,7 +78,8 @@ void get_item::got_data(bdecode_node const& v,
 	// data can reach here, which means pk and sig must be valid.
 	if (!pk || !sig) return;
 
-	std::pair<char const*, int> salt(m_salt.c_str(), int(m_salt.size()));
+    std::string temp_copy(m_data.salt());
+	std::pair<char const*, int> salt(temp_copy.c_str(), int(temp_copy.size()));
 	sha1_hash incoming_target = item_target_id(salt, pk);
 	if (incoming_target != m_target) return;
 
@@ -140,11 +141,7 @@ observer_ptr get_item::new_observer(void* ptr
 
 bool get_item::invoke(observer_ptr o)
 {
-	if (m_done)
-	{
-		m_invoke_count = -1;
-		return false;
-	}
+	if (m_done) return false;
 
 	entry e;
 	e["y"] = "q";
