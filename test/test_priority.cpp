@@ -51,8 +51,6 @@ using namespace libtorrent;
 namespace lt = libtorrent;
 using boost::tuples::ignore;
 
-const int mask = alert::all_categories & ~(alert::performance_warning | alert::stats_notification);
-
 int peer_disconnects = 0;
 
 bool on_alert(alert const* a)
@@ -92,7 +90,6 @@ void test_transfer(settings_pack const& sett)
 
 	pack.set_bool(settings_pack::enable_outgoing_utp, false);
 	pack.set_bool(settings_pack::enable_incoming_utp, false);
-	pack.set_int(settings_pack::alert_mask, mask);
 
 	pack.set_int(settings_pack::out_enc_policy, settings_pack::pe_disabled);
 	pack.set_int(settings_pack::in_enc_policy, settings_pack::pe_disabled);
@@ -105,12 +102,13 @@ void test_transfer(settings_pack const& sett)
 	pack.set_bool(settings_pack::enable_dht, false);
 
 	pack.set_str(settings_pack::listen_interfaces, "0.0.0.0:48075");
-	pack.set_int(settings_pack::alert_mask, mask);
+#ifndef TORRENT_NO_DEPRECATE
+	pack.set_bool(settings_pack::rate_limit_utp, true);
+#endif
 
 	lt::session ses1(pack);
 
 	pack.set_str(settings_pack::listen_interfaces, "0.0.0.0:49075");
-	pack.set_int(settings_pack::alert_mask, mask);
 	lt::session ses2(pack);
 
 	torrent_handle tor1;
@@ -123,7 +121,7 @@ void test_transfer(settings_pack const& sett)
 	file.close();
 
 	wait_for_listen(ses1, "ses1");
-	wait_for_listen(ses2, "ses1");
+	wait_for_listen(ses2, "ses2");
 
 	peer_disconnects = 0;
 
@@ -165,6 +163,7 @@ void test_transfer(settings_pack const& sett)
 		}
 
 		TEST_CHECK(st1.state == torrent_status::seeding
+			|| st1.state == torrent_status::checking_resume_data
 			|| st1.state == torrent_status::checking_files);
 		TEST_CHECK(st2.state == torrent_status::downloading
 			|| st2.state == torrent_status::checking_resume_data);
@@ -377,6 +376,34 @@ TORRENT_TEST(priority)
 
 // test to set piece and file priority on a torrent that doesn't have metadata
 // yet
+TORRENT_TEST(no_metadata_prioritize_files)
+{
+	settings_pack pack = settings();
+	lt::session ses(pack);
+
+	add_torrent_params addp;
+	addp.flags &= ~add_torrent_params::flag_paused;
+	addp.flags &= ~add_torrent_params::flag_auto_managed;
+	addp.info_hash = sha1_hash("abababababababababab");
+	addp.save_path = ".";
+	torrent_handle h = ses.add_torrent(addp);
+
+	std::vector<int> prios(3);
+	prios[0] = 0;
+
+	h.prioritize_files(prios);
+	// TODO 2: this should wait for an alert instead of just sleeping
+	test_sleep(100);
+	TEST_CHECK(h.file_priorities() == prios);
+
+	prios[0] = 1;
+	h.prioritize_files(prios);
+	test_sleep(100);
+	TEST_CHECK(h.file_priorities() == prios);
+
+	ses.remove_torrent(h);
+}
+
 TORRENT_TEST(no_metadata_file_prio)
 {
 	settings_pack pack = settings();
@@ -390,8 +417,11 @@ TORRENT_TEST(no_metadata_file_prio)
 	torrent_handle h = ses.add_torrent(addp);
 
 	h.file_priority(0, 0);
+	// TODO 2: this should wait for an alert instead of just sleeping
+	test_sleep(100);
 	TEST_EQUAL(h.file_priority(0), 0);
 	h.file_priority(0, 1);
+	test_sleep(100);
 	TEST_EQUAL(h.file_priority(0), 1);
 
 	ses.remove_torrent(h);
@@ -416,4 +446,99 @@ TORRENT_TEST(no_metadata_piece_prio)
 	TEST_EQUAL(h.piece_priority(2), 4);
 
 	ses.remove_torrent(h);
+}
+
+TORRENT_TEST(export_file_while_seed)
+{
+	settings_pack pack = settings();
+	lt::session ses(pack);
+
+	error_code ec;
+	create_directory("tmp2_priority", ec);
+	std::ofstream file("tmp2_priority/temporary");
+	boost::shared_ptr<torrent_info> t = ::create_torrent(&file, "temporary", 16 * 1024, 13, false);
+	file.close();
+
+	add_torrent_params addp;
+	addp.flags &= ~add_torrent_params::flag_paused;
+	addp.flags &= ~add_torrent_params::flag_auto_managed;
+	addp.save_path = ".";
+	addp.ti = t;
+	torrent_handle h = ses.add_torrent(addp);
+
+	// write to the partfile
+	h.file_priority(0, 0);
+
+	std::vector<char> piece(16 * 1024);
+	for (int i = 0; i < int(piece.size()); ++i)
+		piece[i] = (i % 26) + 'A';
+
+	for (int i = 0; i < t->num_pieces(); ++i)
+		h.add_piece(i, &piece[0], piece.size());
+
+	TEST_CHECK(!exists("temporary"));
+
+	for (int i = 0; i < 10; ++i)
+	{
+		if (h.status().is_seeding) break;
+		test_sleep(100);
+	}
+	TEST_EQUAL(h.status().is_seeding, true);
+
+	// this should cause the file to be exported
+	h.file_priority(0, 1);
+
+	for (int i = 0; i < 10; ++i)
+	{
+		if (h.file_priority(0) == 1) break;
+		test_sleep(100);
+	}
+
+	TEST_CHECK(exists("temporary"));
+}
+
+TORRENT_TEST(test_piece_priority_after_resume)
+{
+	int const new_prio = 1;
+
+	std::vector<char> fast_resume_buf;
+
+	boost::shared_ptr<torrent_info> ti = generate_torrent();
+	{
+		int const prio = 6;
+
+		add_torrent_params p;
+		p.save_path = ".";
+		p.ti = ti;
+		p.file_priorities.resize(1, prio);
+
+		lt::session ses(settings());
+		torrent_handle h = ses.add_torrent(p);
+
+		TEST_EQUAL(h.piece_priority(0), prio);
+
+		std::vector<std::pair<int, int> > piece_prios;
+		piece_prios.push_back(std::make_pair(0, new_prio));
+		h.prioritize_pieces(piece_prios);
+		TEST_EQUAL(h.piece_priority(0), new_prio);
+
+		ses.pause();
+		h.save_resume_data();
+
+		alert const* a = wait_for_alert(ses, save_resume_data_alert::alert_type);
+		save_resume_data_alert const* rd = alert_cast<save_resume_data_alert>(a);
+
+		bencode(std::back_inserter(fast_resume_buf), *(rd->resume_data));
+	}
+	{
+		add_torrent_params p;
+		p.save_path = ".";
+		p.ti = ti;
+		p.resume_data = fast_resume_buf;
+
+		lt::session ses(settings());
+		torrent_handle h = ses.add_torrent(p);
+
+		TEST_EQUAL(h.piece_priority(0), new_prio);
+	}
 }

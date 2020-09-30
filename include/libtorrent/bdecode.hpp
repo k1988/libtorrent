@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015-2016, Arvid Norberg
+Copyright (c) 2015-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -101,7 +101,7 @@ namespace libtorrent {
 TORRENT_EXPORT boost::system::error_category& bdecode_category();
 
 #ifndef TORRENT_NO_DEPRECATED
-TORRENT_DEPRECATED TORRENT_EXPORT
+TORRENT_DEPRECATED_EXPORT
 boost::system::error_category& get_bdecode_category();
 #endif
 
@@ -292,9 +292,9 @@ struct TORRENT_EXPORT bdecode_node
 	// size of the list. ``size()`` returns the size of the list.
 	bdecode_node list_at(int i) const;
 	std::string list_string_value_at(int i
-		, char const* default_val = "");
+		, char const* default_val = "") const;
 	boost::int64_t list_int_value_at(int i
-		, boost::int64_t default_val = 0);
+		, boost::int64_t default_val = 0) const;
 	int list_size() const;
 
 	// Functions with the ``dict_`` prefix operates on dictionaries. They are

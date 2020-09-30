@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2006-2016, Arvid Norberg, Magnus Jonsson
+Copyright (c) 2006-2018, Arvid Norberg, Magnus Jonsson
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -85,6 +85,32 @@ using libtorrent::aux::session_impl;
 
 namespace libtorrent
 {
+namespace {
+
+#if defined TORRENT_ASIO_DEBUGGING
+	void wait_for_asio_handlers()
+	{
+		int counter = 0;
+		while (log_async())
+		{
+#if defined TORRENT_WINDOWS || defined TORRENT_CYGWIN
+			Sleep(1000);
+#elif defined TORRENT_BEOS
+			snooze_until(system_time() + 1000000, B_SYSTEM_TIMEBASE);
+#else
+			usleep(1000000);
+#endif
+			++counter;
+			printf("\x1b[2J\x1b[0;0H\x1b[33m==== Waiting to shut down: %d ==== \x1b[0m\n\n"
+				, counter);
+		}
+		async_dec_threads();
+
+		fprintf(stderr, "\n\nEXPECTS NO MORE ASYNC OPS\n\n\n");
+	}
+#endif
+} // anonymous namespace
+
 	TORRENT_EXPORT void min_memory_usage(settings_pack& set)
 	{
 		// receive data directly into disk buffers
@@ -246,7 +272,7 @@ namespace libtorrent
 		set.set_int(settings_pack::peer_timeout, 20);
 		set.set_int(settings_pack::inactivity_timeout, 20);
 
-		set.set_int(settings_pack::active_limit, 2000);
+		set.set_int(settings_pack::active_limit, 20000);
 		set.set_int(settings_pack::active_tracker_limit, 2000);
 		set.set_int(settings_pack::active_dht_limit, 600);
 		set.set_int(settings_pack::active_seeds, 2000);
@@ -278,9 +304,7 @@ namespace libtorrent
 		// number of disk threads for low level file operations
 		set.set_int(settings_pack::aio_threads, 8);
 
-		// keep 5 MiB outstanding when checking hashes
-		// of a resumed file
-		set.set_int(settings_pack::checking_mem_usage, 320);
+		set.set_int(settings_pack::checking_mem_usage, 2048);
 
 		// the disk cache performs better with the pool allocator
 		set.set_bool(settings_pack::use_disk_cache_pool, true);
@@ -349,7 +373,7 @@ namespace libtorrent
 			ios = m_io_service.get();
 		}
 
-		m_impl = boost::make_shared<session_impl>(boost::ref(*ios));
+		m_impl = boost::make_shared<session_impl>(boost::ref(*ios), boost::ref(pack));
 		*static_cast<session_handle*>(this) = session_handle(m_impl.get());
 
 #ifndef TORRENT_DISABLE_EXTENSIONS
@@ -363,7 +387,7 @@ namespace libtorrent
 		TORRENT_UNUSED(flags);
 #endif
 
-		m_impl->start_session(pack);
+		m_impl->start_session();
 
 		if (internal_executor)
 		{
@@ -380,28 +404,13 @@ namespace libtorrent
 		TORRENT_ASSERT(m_impl);
 		TORRENT_ASYNC_CALL(abort);
 
-#if defined TORRENT_ASIO_DEBUGGING
-		int counter = 0;
-		while (log_async())
-		{
-#if defined TORRENT_WINDOWS || defined TORRENT_CYGWIN
-			Sleep(1000);
-#elif defined TORRENT_BEOS
-			snooze_until(system_time() + 1000000, B_SYSTEM_TIMEBASE);
-#else
-			usleep(1000000);
-#endif
-			++counter;
-			printf("\x1b[2J\x1b[0;0H\x1b[33m==== Waiting to shut down: %d ==== \x1b[0m\n\n"
-				, counter);
-		}
-		async_dec_threads();
-
-		fprintf(stderr, "\n\nEXPECTS NO MORE ASYNC OPS\n\n\n");
-#endif
-
 		if (m_thread && m_thread.unique())
+		{
+#if defined TORRENT_ASIO_DEBUGGING
+			wait_for_asio_handlers();
+#endif
 			m_thread->join();
+		}
 	}
 
 	session_proxy session::abort()
@@ -426,7 +435,12 @@ namespace libtorrent
 	session_proxy::~session_proxy()
 	{
 		if (m_thread && m_thread.unique())
+		{
+#if defined TORRENT_ASIO_DEBUGGING
+			wait_for_asio_handlers();
+#endif
 			m_thread->join();
+		}
 	}
 }
 

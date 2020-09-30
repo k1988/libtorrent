@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2003-2016, Arvid Norberg
+Copyright (c) 2003-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -89,22 +89,21 @@ namespace libtorrent
 
 			// saves dht state such as nodes and node-id, possibly accelerating
 			// joining the DHT if provided at next session startup.
-			save_dht_state =    0x004,
-
-			// save pe_settings
-			save_encryption_settings = 0x020
+			save_dht_state =    0x004
 
 #ifndef TORRENT_NO_DEPRECATE
 			,
+			// save pe_settings
+			save_encryption_settings TORRENT_DEPRECATED_ENUM = 0x020,
 			save_as_map TORRENT_DEPRECATED_ENUM =       0x040,
 			// saves RSS feeds
 			save_feeds TORRENT_DEPRECATED_ENUM =        0x080,
 			save_proxy TORRENT_DEPRECATED_ENUM =        0x008,
 			save_i2p_proxy TORRENT_DEPRECATED_ENUM =    0x010,
-			save_dht_proxy TORRENT_DEPRECATED_ENUM = save_proxy,
-			save_peer_proxy TORRENT_DEPRECATED_ENUM = save_proxy,
-			save_web_proxy TORRENT_DEPRECATED_ENUM = save_proxy,
-			save_tracker_proxy TORRENT_DEPRECATED_ENUM = save_proxy
+			save_dht_proxy TORRENT_DEPRECATED_ENUM = 0x008, // save_proxy
+			save_peer_proxy TORRENT_DEPRECATED_ENUM = 0x008, // save_proxy
+			save_web_proxy TORRENT_DEPRECATED_ENUM = 0x008, // save_proxy
+			save_tracker_proxy TORRENT_DEPRECATED_ENUM = 0x008 // save_proxy
 #endif
 		};
 
@@ -152,6 +151,18 @@ namespace libtorrent
 		//
 		// Any torrent_status object whose ``handle`` member is not referring to
 		// a valid torrent are ignored.
+		//
+		// The intended use of these functions is to start off by calling
+		// ``get_torrent_status()`` to get a list of all torrents that match your
+		// criteria. Then call ``refresh_torrent_status()`` on that list. This
+		// will only refresh the status for the torrents in your list, and thus
+		// ignore all other torrents you might be running. This may save a
+		// significant amount of time, especially if the number of torrents you're
+		// interested in is small. In order to keep your list of interested
+		// torrents up to date, you can either call ``get_torrent_status()`` from
+		// time to time, to include torrents you might have become interested in
+		// since the last time. In order to stop refreshing a certain torrent,
+		// simply remove it from the list.
 		void get_torrent_status(std::vector<torrent_status>* ret
 			, boost::function<bool(torrent_status const&)> const& pred
 			, boost::uint32_t flags = 0) const;
@@ -589,11 +600,11 @@ namespace libtorrent
 		// deprecated in 1.1, use settings_pack::peer_fingerprint instead
 		TORRENT_DEPRECATED
 		void set_peer_id(peer_id const& pid);
-#endif
 
-		// returns the raw peer ID used by libtorrent. When anonymous mode is set
-		// the peer ID is randomized per peer.
+		// deprecated in 1.1.7. read settings_pack::peer_fingerprint instead
+		TORRENT_DEPRECATED
 		peer_id id() const;
+#endif
 
 		// sets the key sent to trackers. If it's not set, it is initialized
 		// by libtorrent. The key may be used by the tracker to identify the
@@ -633,10 +644,9 @@ namespace libtorrent
 		// 
 		// .. code:: c++
 		//
-		// 	ip_filter f;
-		// 	int my_class = ses.create_peer_class("200.1.x.x IP range");
-		// 	f.add_rule(address_v4::from_string("200.1.1.0")
-		// 		, address_v4::from_string("200.1.255.255")
+		// 	ip_filter f = ses.get_peer_class_filter();
+		// 	peer_class_t const my_class = ses.create_peer_class("200.1.x.x IP range");
+		// 	f.add_rule(make_address("200.1.1.0"), make_address("200.1.255.255")
 		// 		, 1 << my_class);
 		// 	ses.set_peer_class_filter(f);
 		//
@@ -651,8 +661,11 @@ namespace libtorrent
 		// The ``peer_class`` argument cannot be greater than 31. The bitmasks
 		// representing peer classes in the ``peer_class_filter`` are 32 bits.
 		//
+		// The ``get_peer_class_filter()`` function returns the current filter.
+		//
 		// For more information, see peer-classes_.
 		void set_peer_class_filter(ip_filter const& f);
+		ip_filter get_peer_class_filter() const;
 
 		// Sets and gets the *peer class type filter*. This is controls automatic
 		// peer class assignments to peers based on what kind of socket it is.
@@ -667,8 +680,8 @@ namespace libtorrent
 		// 3. peer-class type filter, adding classes
 		//
 		// For more information, see peer-classes_.
-		// TODO: add get_peer_class_type_filter() as well
 		void set_peer_class_type_filter(peer_class_type_filter const& f);
+		peer_class_type_filter get_peer_class_type_filter() const;
 
 		// Creates a new peer class (see peer-classes_) with the given name. The
 		// returned integer is the new peer class identifier. Peer classes may
@@ -676,11 +689,11 @@ namespace libtorrent
 		// class and returns a unique identifier.
 		//
 		// Identifiers are assigned from low numbers to higher. So if you plan on
-		// using certain peer classes in a call to `set_peer_class_filter()`_,
+		// using certain peer classes in a call to set_peer_class_filter(),
 		// make sure to create those early on, to get low identifiers.
 		//
 		// For more information on peer classes, see peer-classes_.
-		int create_peer_class(char const* name);
+		peer_class_t create_peer_class(char const* name);
 
 		// This call dereferences the reference count of the specified peer
 		// class. When creating a peer class it's automatically referenced by 1.
@@ -699,7 +712,7 @@ namespace libtorrent
 		// destructs.
 		//
 		// For more information on peer classes, see peer-classes_.
-		void delete_peer_class(int cid);
+		void delete_peer_class(peer_class_t cid);
 
 		// These functions queries information from a peer class and updates the
 		// configuration of a peer class, respectively.
@@ -708,7 +721,7 @@ namespace libtorrent
 		// return value of ``get_peer_class()`` is undefined.
 		//
 		// ``set_peer_class()`` sets all the information in the
-		// ``peer_class_info`` object in the specified peer class. There is no
+		// peer_class_info object in the specified peer class. There is no
 		// option to only update a single property.
 		//
 		// A peer or torrent belonging to more than one class, the highest
@@ -716,8 +729,8 @@ namespace libtorrent
 		// account.
 		//
 		// For more information, see peer-classes_.
-		peer_class_info get_peer_class(int cid);
-		void set_peer_class(int cid, peer_class_info const& pci);
+		peer_class_info get_peer_class(peer_class_t cid);
+		void set_peer_class(peer_class_t cid, peer_class_info const& pci);
 
 #ifndef TORRENT_NO_DEPRECATE
 		// if the listen port failed in some way you can retry to listen on

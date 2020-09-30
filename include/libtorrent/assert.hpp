@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2007-2016, Arvid Norberg
+Copyright (c) 2007-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -73,7 +73,7 @@ TORRENT_EXPORT void assert_fail(const char* expr, int line
 #if TORRENT_USE_ASSERTS
 
 #ifdef TORRENT_PRODUCTION_ASSERTS
-extern char const* libtorrent_assert_log;
+extern TORRENT_EXPORT char const* libtorrent_assert_log;
 #endif
 
 #if TORRENT_USE_IOSTREAM

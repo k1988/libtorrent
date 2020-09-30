@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2007-2016, Arvid Norberg
+Copyright (c) 2007-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -112,12 +112,12 @@ void lsd::debug_log(char const* fmt, ...) const
 void lsd::start(error_code& ec)
 {
 	m_socket.open(boost::bind(&lsd::on_announce, self(), _1, _2, _3)
-		, m_broadcast_timer.get_io_service(), ec);
+		, lt::get_io_service(m_broadcast_timer), ec);
 	if (ec) return;
 
 #if TORRENT_USE_IPV6
 	m_socket6.open(boost::bind(&lsd::on_announce, self(), _1, _2, _3)
-		, m_broadcast_timer.get_io_service(), ec);
+		, lt::get_io_service(m_broadcast_timer), ec);
 #endif
 }
 

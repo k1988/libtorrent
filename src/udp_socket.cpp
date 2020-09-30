@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2007-2016, Arvid Norberg
+Copyright (c) 2007-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -586,8 +586,10 @@ void udp_socket::setup_read(udp::socket* s)
 		error_code ec;
 		boost::system::system_error e(ec);
 #endif
-		get_io_service().post(boost::bind(&udp_socket::on_read
-			, this, e.code(), s));
+		on_read_impl(udp::endpoint(), e.code(), 0);
+		m_abort = true;
+		close();
+		return;
 	}
 }
 
@@ -806,8 +808,7 @@ void udp_socket::bind(udp::endpoint const& ep, error_code& ec)
 
 		m_ipv4_sock.bind(ep, ec);
 		if (ec) return;
-		udp::socket::non_blocking_io ioc(true);
-		m_ipv4_sock.io_control(ioc, ec);
+		m_ipv4_sock.non_blocking(true, ec);
 		if (ec) return;
 		setup_read(&m_ipv4_sock);
 	}
@@ -837,8 +838,7 @@ void udp_socket::bind(udp::endpoint const& ep, error_code& ec)
 			, boost::system::generic_category()))
 		{
 			if (ec) return;
-			udp::socket::non_blocking_io ioc(true);
-			m_ipv6_sock.io_control(ioc, ec);
+			m_ipv6_sock.non_blocking(true, ec);
 			if (ec) return;
 			setup_read(&m_ipv6_sock);
 		}

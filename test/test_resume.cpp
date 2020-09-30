@@ -38,6 +38,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/alert_types.hpp"
 #include "libtorrent/entry.hpp"
 #include "libtorrent/bencode.hpp"
+#include "libtorrent/peer_info.hpp"
 
 #include <boost/make_shared.hpp>
 
@@ -47,31 +48,6 @@ POSSIBILITY OF SUCH DAMAGE.
 
 using namespace libtorrent;
 namespace lt = libtorrent;
-
-boost::shared_ptr<torrent_info> generate_torrent()
-{
-	file_storage fs;
-	fs.add_file("test_resume/tmp1", 128 * 1024 * 8);
-	fs.add_file("test_resume/tmp2", 128 * 1024);
-	fs.add_file("test_resume/tmp3", 128 * 1024);
-	lt::create_torrent t(fs, 128 * 1024, 6);
-
-	t.add_tracker("http://torrent_file_tracker.com/announce");
-	t.add_url_seed("http://torrent_file_url_seed.com/");
-
-	int num = t.num_pieces();
-	TEST_CHECK(num > 0);
-	for (int i = 0; i < num; ++i)
-	{
-		sha1_hash ph;
-		for (int k = 0; k < 20; ++k) ph[k] = lt::random();
-		t.set_hash(i, ph);
-	}
-
-	std::vector<char> buf;
-	bencode(std::back_inserter(buf), t.generate());
-	return boost::make_shared<torrent_info>(&buf[0], buf.size());
-}
 
 std::vector<char> generate_resume_data(torrent_info* ti
 	, char const* file_priorities = "")
@@ -98,9 +74,9 @@ std::vector<char> generate_resume_data(torrent_info* ti
 	rd["super_seeding"] = 0;
 	rd["added_time"] = 1347;
 	rd["completed_time"] = 1348;
-	rd["last_scrape"] = 1349;
-	rd["last_download"] = 1350;
-	rd["last_upload"] = 1351;
+	rd["last_scrape"] = 1;
+	rd["last_download"] = 2;
+	rd["last_upload"] = 3;
 	rd["finished_time"] = 1352;
 	if (file_priorities && file_priorities[0])
 	{
@@ -176,20 +152,26 @@ void default_tests(torrent_status const& s)
 	// allow some slack in the time stamps since they are reported as
 	// relative times. If the computer is busy while running the unit test
 	// or running under valgrind it may take several seconds
-	TEST_CHECK(s.last_scrape >= 1349);
-	TEST_CHECK(s.time_since_download >= 1350);
-	TEST_CHECK(s.time_since_upload >= 1351);
+	int const now = duration_cast<seconds>(clock_type::now().time_since_epoch()).count();
+	TEST_CHECK(s.last_scrape >= now - 1);
+	TEST_CHECK(s.time_since_download >= now - 2);
+	TEST_CHECK(s.time_since_upload >= now - 3);
 	TEST_CHECK(s.active_time >= 1339);
 
-	TEST_CHECK(s.last_scrape < 1349 + 10);
-	TEST_CHECK(s.time_since_download < 1350 + 10);
-	TEST_CHECK(s.time_since_upload < 1351 + 10);
+	TEST_CHECK(s.last_scrape < now - 1 + 10);
+	TEST_CHECK(s.time_since_download < now - 2 + 10);
+	TEST_CHECK(s.time_since_upload < now - 3 + 10);
 	TEST_CHECK(s.active_time < 1339 + 10);
 
-	TEST_EQUAL(s.finished_time, 1352);
-	TEST_EQUAL(s.seeding_time, 1340);
-	TEST_EQUAL(s.added_time, 1347);
-	TEST_EQUAL(s.completed_time, 1348);
+	TEST_CHECK(s.finished_time >= 1352);
+	TEST_CHECK(s.seeding_time >= 1340);
+	TEST_CHECK(s.added_time >= 1347);
+	TEST_CHECK(s.completed_time >= 1348);
+
+	TEST_CHECK(s.finished_time < 1352 + 5);
+	TEST_CHECK(s.seeding_time < 1340 + 5);
+	TEST_CHECK(s.added_time < 1347 + 5);
+	TEST_CHECK(s.completed_time < 1348 + 5);
 }
 
 void test_file_sizes(bool allocate)
@@ -308,6 +290,45 @@ TORRENT_TEST(file_priorities_default)
 	TEST_EQUAL(file_priorities[2], 4);
 }
 
+// As long as the add_torrent_params priorities are empty, the file_priorities
+// from the resume data should take effect
+TORRENT_TEST(file_priorities_in_resume)
+{
+	lt::session ses(settings());
+	std::vector<int> file_priorities = test_resume_flags(ses, 0, "", "123").file_priorities();
+
+	TEST_EQUAL(file_priorities.size(), 3);
+	TEST_EQUAL(file_priorities[0], 1);
+	TEST_EQUAL(file_priorities[1], 2);
+	TEST_EQUAL(file_priorities[2], 3);
+}
+
+// if both resume data and add_torrent_params has file_priorities, the
+// add_torrent_params one take precedence
+TORRENT_TEST(file_priorities_in_resume_and_params)
+{
+	lt::session ses(settings());
+	std::vector<int> file_priorities = test_resume_flags(ses, 0, "456", "123").file_priorities();
+
+	TEST_EQUAL(file_priorities.size(), 3);
+	TEST_EQUAL(file_priorities[0], 4);
+	TEST_EQUAL(file_priorities[1], 5);
+	TEST_EQUAL(file_priorities[2], 6);
+}
+
+// if we set flag_override_resume_data, it should no affect file priorities
+TORRENT_TEST(file_priorities_override_resume)
+{
+	lt::session ses(settings());
+	std::vector<int> file_priorities = test_resume_flags(ses
+		, add_torrent_params::flag_override_resume_data, "", "123").file_priorities();
+
+	TEST_EQUAL(file_priorities.size(), 3);
+	TEST_EQUAL(file_priorities[0], 1);
+	TEST_EQUAL(file_priorities[1], 2);
+	TEST_EQUAL(file_priorities[2], 3);
+}
+
 TORRENT_TEST(file_priorities_resume_seed_mode)
 {
 	// in share mode file priorities should always be 0
@@ -336,8 +357,6 @@ TORRENT_TEST(file_priorities_seed_mode)
 
 TORRENT_TEST(zero_file_prio)
 {
-	fprintf(stderr, "test_file_prio\n");
-
 	lt::session ses(settings());
 	boost::shared_ptr<torrent_info> ti = generate_torrent();
 	add_torrent_params p;
@@ -351,17 +370,10 @@ TORRENT_TEST(zero_file_prio)
 	rd["info-hash"] = ti->info_hash().to_string();
 	rd["blocks per piece"] = (std::max)(1, ti->piece_length() / 0x4000);
 
-	entry::list_type& file_prio = rd["file_priority"].list();
-	for (int i = 0; i < 100; ++i)
-	{
-		file_prio.push_back(entry(0));
-	}
+	// set file priorities to 0
+	rd["file_priority"] = entry::list_type(100, entry(0));
 
-	std::string pieces(ti->num_pieces(), '\x01');
-	rd["pieces"] = pieces;
-
-	std::string pieces_prio(ti->num_pieces(), '\x01');
-	rd["piece_priority"] = pieces_prio;
+	rd["pieces"] = std::string(ti->num_pieces(), '\x01');
 
 	bencode(back_inserter(p.resume_data), rd);
 
@@ -369,6 +381,37 @@ TORRENT_TEST(zero_file_prio)
 
 	torrent_status s = h.status();
 	TEST_EQUAL(s.total_wanted, 0);
+}
+
+TORRENT_TEST(mixing_file_and_piece_prio)
+{
+	lt::session ses(settings());
+	boost::shared_ptr<torrent_info> ti = generate_torrent();
+	add_torrent_params p;
+	p.ti = ti;
+	p.save_path = ".";
+
+	entry rd;
+
+	rd["file-format"] = "libtorrent resume file";
+	rd["file-version"] = 1;
+	rd["info-hash"] = ti->info_hash().to_string();
+	rd["blocks per piece"] = (std::max)(1, ti->piece_length() / 0x4000);
+
+	// set file priorities to 0
+	rd["file_priority"] = entry::list_type(100, entry(0));
+
+	rd["pieces"] = std::string(ti->num_pieces(), '\x01');
+
+	// but set the piece priorities to 1. these take precedence
+	rd["piece_priority"] = std::string(ti->num_pieces(), '\x01');
+
+	bencode(back_inserter(p.resume_data), rd);
+
+	torrent_handle h = ses.add_torrent(p);
+
+	torrent_status s = h.status();
+	TEST_EQUAL(s.total_wanted, ti->total_size());
 }
 
 void test_seed_mode(bool file_prio, bool pieces_have, bool piece_prio
@@ -453,6 +496,39 @@ TORRENT_TEST(seed_mode_piece_have)
 TORRENT_TEST(seed_mode_preserve)
 {
 	test_seed_mode(false, false, false);
+}
+
+TORRENT_TEST(seed_mode_load_peers)
+{
+	lt::session ses(settings());
+	boost::shared_ptr<torrent_info> ti = generate_torrent();
+	add_torrent_params p;
+	p.ti = ti;
+	p.save_path = ".";
+
+	entry rd;
+
+	rd["file-format"] = "libtorrent resume file";
+	rd["file-version"] = 1;
+	rd["info-hash"] = ti->info_hash().to_string();
+	rd["blocks per piece"] = std::max(1, ti->piece_length() / 0x4000);
+
+	rd["pieces"] = std::string(ti->num_pieces(), '\x01');
+	rd["piece_priority"] = std::string(ti->num_pieces(), '\x01');
+	rd["seed_mode"] = 1;
+	rd["peers"] = "\x01\x02\x03\x04\x30\x39";
+
+	bencode(back_inserter(p.resume_data), rd);
+
+	torrent_handle h = ses.add_torrent(p);
+
+	wait_for_alert(ses, torrent_checked_alert::alert_type, "seed_mode_load_peers");
+
+	std::vector<peer_list_entry> peers;
+	h.get_full_peer_list(peers);
+
+	TEST_EQUAL(peers.size(), 1);
+	TEST_CHECK(peers[0].ip == tcp::endpoint(address::from_string("1.2.3.4"), 12345));
 }
 
 TORRENT_TEST(resume_save_load)

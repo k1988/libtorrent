@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2007-2016, Arvid Norberg
+Copyright (c) 2007-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -42,6 +42,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/aux_/disable_warnings_push.hpp"
 #include <boost/function/function1.hpp>
 #include <boost/shared_ptr.hpp>
+#include <boost/noncopyable.hpp>
 #include "libtorrent/aux_/disable_warnings_pop.hpp"
 
 namespace libtorrent {
@@ -65,6 +66,11 @@ public:
 		m_hostname = hostname;
 		m_port = port;
 	}
+
+#if BOOST_VERSION >= 106600
+	typedef tcp::socket::executor_type executor_type;
+	executor_type get_executor() { return m_sock.get_executor(); }
+#endif
 
 	template <class Mutable_Buffers, class Handler>
 	void async_read_some(Mutable_Buffers const& buffers, Handler const& handler)
@@ -120,6 +126,18 @@ public:
 	void async_write_some(Const_Buffers const& buffers, Handler const& handler)
 	{
 		m_sock.async_write_some(buffers, handler);
+	}
+
+#ifndef BOOST_NO_EXCEPTIONS
+	void non_blocking(bool b)
+	{
+		m_sock.non_blocking(b);
+	}
+#endif
+
+	error_code non_blocking(bool b, error_code& ec)
+	{
+		return m_sock.non_blocking(b, ec);
 	}
 
 #ifndef BOOST_NO_EXCEPTIONS
@@ -232,7 +250,7 @@ public:
 
 	io_service& get_io_service()
 	{
-		return m_sock.get_io_service();
+		return lt::get_io_service(m_sock);
 	}
 
 	lowest_layer_type& lowest_layer()

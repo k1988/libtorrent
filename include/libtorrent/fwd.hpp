@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2017, Arvid Norberg
+Copyright (c) 2017-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -32,8 +32,6 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef TORRENT_FWD_HPP
 #define TORRENT_FWD_HPP
-
-#include "libtorrent/export.hpp"
 
 namespace libtorrent {
 
@@ -179,9 +177,11 @@ class hasher;
 struct ip_filter;
 class port_filter;
 
-// include/libtorrent/kademlia/dht_storage.hpp
-struct dht_storage_counters;
-struct dht_storage_interface;
+// include/libtorrent/peer_class.hpp
+struct peer_class_info;
+
+// include/libtorrent/peer_class_type_filter.hpp
+struct peer_class_type_filter;
 
 // include/libtorrent/peer_connection_handle.hpp
 struct peer_connection_handle;
@@ -244,6 +244,14 @@ class torrent_info;
 // include/libtorrent/torrent_status.hpp
 struct torrent_status;
 
+namespace dht {
+
+// include/libtorrent/kademlia/dht_storage.hpp
+struct dht_storage_counters;
+struct dht_storage_interface;
+
+}
+
 #ifndef TORRENT_NO_DEPRECATE
 
 // include/libtorrent/alert_types.hpp
@@ -261,5 +269,7 @@ struct lazy_entry;
 #endif // TORRENT_NO_DEPRECATE
 
 }
+
+namespace lt = libtorrent;
 
 #endif // TORRENT_FWD_HPP

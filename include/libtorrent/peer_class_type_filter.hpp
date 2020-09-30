@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2012-2016, Arvid Norberg
+Copyright (c) 2012-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -33,8 +33,8 @@ POSSIBILITY OF SUCH DAMAGE.
 #ifndef TORRENT_PEER_CLASS_TYPE_FILTER_HPP_INCLUDED
 #define TORRENT_PEER_CLASS_TYPE_FILTER_HPP_INCLUDED
 
-#include <string.h> // for memset
 #include <boost/cstdint.hpp>
+#include <boost/array.hpp>
 
 namespace libtorrent
 {
@@ -42,12 +42,12 @@ namespace libtorrent
 	// ``peer_class_type_filter`` is a simple container for rules for adding and subtracting
 	// peer-classes from peers. It is applied *after* the peer class filter is applied (which
 	// is based on the peer's IP address).
-	struct peer_class_type_filter
+	struct TORRENT_EXPORT peer_class_type_filter
 	{
 		peer_class_type_filter()
 		{
-			memset(m_peer_class_type_mask, 0xff, sizeof(m_peer_class_type_mask));
-			memset(m_peer_class_type, 0, sizeof(m_peer_class_type));
+			m_peer_class_type_mask.fill(0xffffffff);
+			m_peer_class_type.fill(0);
 		}
 
 		enum socket_type_t
@@ -62,10 +62,9 @@ namespace libtorrent
 			num_socket_types
 		};
 
-
 		// ``add()`` and ``remove()`` adds and removes a peer class to be added
 		// to new peers based on socket type.
-		void add(socket_type_t st, int peer_class)
+		void add(socket_type_t st, peer_class_t peer_class)
 		{
 			TORRENT_ASSERT(peer_class >= 0);
 			TORRENT_ASSERT(peer_class < 32);
@@ -75,7 +74,7 @@ namespace libtorrent
 			if (st < 0 || st >= num_socket_types) return;
 			m_peer_class_type[st] |= 1 << peer_class;
 		}
-		void remove(socket_type_t st, int peer_class)
+		void remove(socket_type_t st, peer_class_t peer_class)
 		{
 			TORRENT_ASSERT(peer_class >= 0);
 			TORRENT_ASSERT(peer_class < 32);
@@ -91,7 +90,7 @@ namespace libtorrent
 		// 
 		// The ``peer_class`` argument cannot be greater than 31. The bitmasks representing
 		// peer classes in the ``peer_class_type_filter`` are 32 bits.
-		void disallow(socket_type_t st, int peer_class)
+		void disallow(socket_type_t st, peer_class_t peer_class)
 		{
 			TORRENT_ASSERT(peer_class >= 0);
 			TORRENT_ASSERT(peer_class < 32);
@@ -101,7 +100,7 @@ namespace libtorrent
 			if (st < 0 || st >= num_socket_types) return;
 			m_peer_class_type_mask[st] &= ~(1 << peer_class);
 		}
-		void allow(socket_type_t st, int peer_class)
+		void allow(socket_type_t st, peer_class_t peer_class)
 		{
 			TORRENT_ASSERT(peer_class >= 0);
 			TORRENT_ASSERT(peer_class < 32);
@@ -127,12 +126,19 @@ namespace libtorrent
 			return peer_class_mask;
 		}
 
+		friend bool operator==(peer_class_type_filter const& lhs
+			, peer_class_type_filter const& rhs)
+		{
+			return lhs.m_peer_class_type_mask == rhs.m_peer_class_type_mask
+				&& lhs.m_peer_class_type == rhs.m_peer_class_type;
+		}
+
 	private:
 		// maps socket type to a bitmask that's used to filter out
 		// (mask) bits from the m_peer_class_filter.
-		boost::uint32_t m_peer_class_type_mask[5];
+		boost::array<boost::uint32_t, num_socket_types> m_peer_class_type_mask;
 		// peer class bitfield added based on socket type
-		boost::uint32_t m_peer_class_type[5];
+		boost::array<boost::uint32_t, num_socket_types> m_peer_class_type;
 	};
 
 }

@@ -41,7 +41,10 @@ namespace libtorrent
 {
 	class alert;
 	struct add_torrent_params;
+	class file_storage;
 }
+
+EXPORT boost::shared_ptr<lt::torrent_info> generate_torrent();
 
 EXPORT int print_failures();
 EXPORT unsigned char random_byte();
@@ -64,7 +67,9 @@ EXPORT libtorrent::sha1_hash rand_hash();
 EXPORT std::map<std::string, boost::int64_t> get_counters(libtorrent::session& s);
 
 EXPORT libtorrent::alert const* wait_for_alert(
-	libtorrent::session& ses, int type, char const* name = "", int num = 1);
+	libtorrent::session& ses, int type, char const* name = ""
+	, int num = 1
+	, lt::time_duration timeout = lt::seconds(10));
 
 EXPORT void print_ses_rate(float time
 	, libtorrent::torrent_status const* st1
@@ -75,7 +80,7 @@ EXPORT bool print_alerts(libtorrent::session& ses, char const* name
 	, bool allow_disconnects = false
 	, bool allow_no_torrents = false
 	, bool allow_failed_fastresume = false
-	, boost::function<bool(libtorrent::alert const*)> predicate
+	, boost::function<bool(libtorrent::alert const*)> const& predicate
 		= boost::function<bool(libtorrent::alert const*)>()
 	, bool no_output = false);
 
@@ -83,7 +88,8 @@ EXPORT void wait_for_listen(libtorrent::session& ses, char const* name);
 EXPORT void wait_for_downloading(libtorrent::session& ses, char const* name);
 EXPORT void test_sleep(int millisec);
 
-EXPORT void create_random_files(std::string const& path, const int file_sizes[], int num_files);
+EXPORT void create_random_files(std::string const& path, const int file_sizes[]
+	, int num_files, libtorrent::file_storage* fs = NULL);
 
 EXPORT boost::shared_ptr<libtorrent::torrent_info> create_torrent(std::ostream* file = 0
 	, char const* name = "temporary", int piece_size = 16 * 1024, int num_pieces = 13

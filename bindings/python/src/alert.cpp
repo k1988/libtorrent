@@ -10,6 +10,8 @@
 #include <memory>
 #include "bytes.hpp"
 
+#include <boost/type_traits/is_polymorphic.hpp>
+
 using namespace boost::python;
 using namespace libtorrent;
 
@@ -107,19 +109,19 @@ list dht_stats_routing_table(dht_stats_alert const& a)
 dict dht_immutable_item(dht_immutable_item_alert const& alert)
 {
     dict d;
-    d["key"] = alert.target.to_string();
-    d["value"] = alert.item.to_string();
+    d["key"] = alert.target;
+    d["value"] = bytes(alert.item.to_string());
     return d;
 }
 
 dict dht_mutable_item(dht_mutable_item_alert const& alert)
 {
     dict d;
-    d["key"] = std::string(alert.key.data(), alert.key.size());
-    d["value"] = alert.item.to_string();
-    d["signature"] = std::string(alert.signature.data(), alert.signature.size());
+    d["key"] = bytes(alert.key.data(), alert.key.size());
+    d["value"] = bytes(alert.item.to_string());
+    d["signature"] = bytes(alert.signature.data(), alert.signature.size());
     d["seq"] = alert.seq;
-    d["salt"] = alert.salt;
+    d["salt"] = bytes(alert.salt);
     d["authoritative"] = alert.authoritative;
     return d;
 }
@@ -128,12 +130,12 @@ dict dht_put_item(dht_put_alert const& alert)
 {
     dict d;
     if (alert.target.is_all_zeros()) {
-        d["public_key"] = std::string(alert.public_key.data(), alert.public_key.size());
-        d["signature"] = std::string(alert.signature.data(), alert.signature.size());
+        d["public_key"] = bytes(alert.public_key.data(), alert.public_key.size());
+        d["signature"] = bytes(alert.signature.data(), alert.signature.size());
         d["seq"] = alert.seq;
-        d["salt"] = alert.salt;
+        d["salt"] = bytes(alert.salt);
     } else {
-        d["target"] = alert.target.to_string();
+        d["target"] = alert.target;
     }
     return d;
 }
@@ -224,6 +226,9 @@ void bind_alert()
             .value("dht_operation_notification", alert::dht_operation_notification)
             .value("port_mapping_log_notification", alert::port_mapping_log_notification)
             .value("picker_log_notification", alert::picker_log_notification)
+            .value("file_progress_notification", alert::file_progress_notification)
+            .value("piece_progress_notification", alert::piece_progress_notification)
+            .value("block_progress_notification", alert::block_progress_notification)
             // deliberately not INT_MAX. Arch linux crash while throwing an exception
             .value("all_categories", (alert::category_t)0xfffffff)
             ;
@@ -232,7 +237,8 @@ void bind_alert()
 
     class_<torrent_alert, bases<alert>, noncopyable>(
         "torrent_alert", no_init)
-        .def_readonly("handle", &torrent_alert::handle)
+        .add_property("handle", make_getter(&torrent_alert::handle, by_value()))
+        .add_property("torrent_name", &torrent_alert::torrent_name)
         ;
 
     class_<tracker_alert, bases<torrent_alert>, noncopyable>(
@@ -411,7 +417,26 @@ void bind_alert()
     class_<listen_succeeded_alert, bases<alert>, noncopyable>(
         "listen_succeeded_alert", no_init)
         .add_property("endpoint", make_getter(&listen_succeeded_alert::endpoint, by_value()))
+        .def_readonly("sock_type", &listen_succeeded_alert::sock_type)
         ;
+
+    enum_<listen_succeeded_alert::socket_type_t>("listen_succeded_alert_socket_type_t")
+       .value("tcp", listen_succeeded_alert::tcp)
+       .value("tcp_ssl", listen_succeeded_alert::tcp_ssl)
+       .value("udp", listen_succeeded_alert::udp)
+       .value("i2p", listen_succeeded_alert::i2p)
+       .value("socks5", listen_succeeded_alert::socks5)
+       .value("utp_ssl", listen_succeeded_alert::utp_ssl)
+       ;
+
+    enum_<listen_failed_alert::socket_type_t>("listen_failed_alert_socket_type_t")
+       .value("tcp", listen_failed_alert::tcp)
+       .value("tcp_ssl", listen_failed_alert::tcp_ssl)
+       .value("udp", listen_failed_alert::udp)
+       .value("i2p", listen_failed_alert::i2p)
+       .value("socks5", listen_failed_alert::socks5)
+       .value("utp_ssl", listen_failed_alert::utp_ssl)
+       ;
 
     class_<portmap_error_alert, bases<alert>, noncopyable>(
         "portmap_error_alert", no_init)

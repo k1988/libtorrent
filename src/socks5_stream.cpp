@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2007-2016, Arvid Norberg
+Copyright (c) 2007-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -48,7 +48,7 @@ namespace libtorrent
 	struct socks_error_category : boost::system::error_category
 	{
 		virtual const char* name() const BOOST_SYSTEM_NOEXCEPT
-		{ return "socks error"; }
+		{ return "socks"; }
 		virtual std::string message(int ev) const BOOST_SYSTEM_NOEXCEPT
 		{
 			static char const* messages[] =

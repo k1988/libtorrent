@@ -134,6 +134,8 @@ static test_torrent_t test_torrents[] =
 	{ "unordered.torrent" },
 	{ "symlink_zero_size.torrent" },
 	{ "pad_file_no_path.torrent" },
+	{ "invalid_filename.torrent" },
+	{ "invalid_filename2.torrent" },
 };
 
 struct test_failing_torrent_t
@@ -159,6 +161,7 @@ test_failing_torrent_t test_error_torrents[] =
 	{ "unaligned_pieces.torrent", errors::torrent_invalid_hashes },
 	{ "invalid_root_hash.torrent", errors::torrent_invalid_hashes },
 	{ "invalid_root_hash2.torrent", errors::torrent_missing_pieces },
+	{ "invalid_merkle.torrent", errors::no_files_in_torrent},
 	{ "invalid_file_size.torrent", errors::torrent_invalid_length },
 	{ "invalid_symlink.torrent", errors::torrent_invalid_name },
 };
@@ -326,6 +329,11 @@ TORRENT_TEST(sanitize_path_trailing_spaces)
 TORRENT_TEST(sanitize_path)
 {
 	std::string path;
+
+	sanitize_append_path_element(path, "\0\0\xed\0\x80", 5);
+	TEST_EQUAL(path, "_");
+
+	path.clear();
 	sanitize_append_path_element(path, "/a/", 3);
 	sanitize_append_path_element(path, "b", 1);
 	sanitize_append_path_element(path, "c", 1);
@@ -355,7 +363,7 @@ TORRENT_TEST(sanitize_path)
 	path.clear();
 	sanitize_append_path_element(path, "dev:", 4);
 #ifdef TORRENT_WINDOWS
-	TEST_EQUAL(path, "dev");
+	TEST_EQUAL(path, "dev_");
 #else
 	TEST_EQUAL(path, "dev:");
 #endif
@@ -364,7 +372,7 @@ TORRENT_TEST(sanitize_path)
 	sanitize_append_path_element(path, "c:", 2);
 	sanitize_append_path_element(path, "b", 1);
 #ifdef TORRENT_WINDOWS
-	TEST_EQUAL(path, "c" SEPARATOR "b");
+	TEST_EQUAL(path, "c_" SEPARATOR "b");
 #else
 	TEST_EQUAL(path, "c:" SEPARATOR "b");
 #endif
@@ -374,7 +382,7 @@ TORRENT_TEST(sanitize_path)
 	sanitize_append_path_element(path, ".", 1);
 	sanitize_append_path_element(path, "c", 1);
 #ifdef TORRENT_WINDOWS
-	TEST_EQUAL(path, "c" SEPARATOR "c");
+	TEST_EQUAL(path, "c_" SEPARATOR "c");
 #else
 	TEST_EQUAL(path, "c:" SEPARATOR "c");
 #endif
@@ -506,6 +514,28 @@ TORRENT_TEST(sanitize_path)
 	TEST_EQUAL(path, "foobar");
 }
 
+TORRENT_TEST(sanitize_path_zeroes)
+{
+	std::string path;
+	sanitize_append_path_element(path, "\0foo", 4);
+	TEST_EQUAL(path, "foo");
+
+	path.clear();
+	sanitize_append_path_element(path, "\0\0\0\0", 4);
+	TEST_EQUAL(path, "");
+}
+
+TORRENT_TEST(sanitize_path_colon)
+{
+	std::string path;
+	sanitize_append_path_element(path, "foo:bar", 7);
+#ifdef TORRENT_WINDOWS
+	TEST_EQUAL(path, "foo_bar");
+#else
+	TEST_EQUAL(path, "foo:bar");
+#endif
+}
+
 TORRENT_TEST(verify_encoding)
 {
 	// verify_encoding
@@ -585,6 +615,12 @@ TORRENT_TEST(verify_encoding)
 	TEST_CHECK(!verify_encoding(test));
 	fprintf(stdout, "%s\n", test.c_str());
 	TEST_CHECK(test == "filename____");
+
+	// missing byte header
+	test = "filename\xed\0\x80";
+	TEST_CHECK(!verify_encoding(test));
+	fprintf(stdout, "%s\n", test.c_str());
+	TEST_CHECK(test == "filename_");
 }
 
 TORRENT_TEST(parse_torrents)
@@ -619,7 +655,7 @@ TORRENT_TEST(parse_torrents)
 	torrent_info ti2(&buf[0], buf.size(), ec);
 	std::cerr << ti2.name() << std::endl;
 #ifdef TORRENT_WINDOWS
-	TEST_EQUAL(ti2.name(), "ctest1test2test3");
+	TEST_EQUAL(ti2.name(), "c_test1test2test3");
 #else
 	TEST_EQUAL(ti2.name(), "test1test2test3");
 #endif
@@ -746,6 +782,14 @@ TORRENT_TEST(parse_torrents)
 		{
 			TEST_EQUAL(ti->num_files(), 2);
 			TEST_EQUAL(ti->files().file_path(1), combine_path(".pad", "0"));
+		}
+		else if (std::string(test_torrents[i].file) == "invalid_filename.torrent")
+		{
+			TEST_EQUAL(ti->num_files(), 2);
+		}
+		else if (std::string(test_torrents[i].file) == "invalid_filename2.torrent")
+		{
+			TEST_EQUAL(ti->num_files(), 3);
 		}
 
 		file_storage const& fs = ti->files();

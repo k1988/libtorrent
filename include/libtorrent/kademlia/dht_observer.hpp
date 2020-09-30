@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2012-2016, Arvid Norberg
+Copyright (c) 2012-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -41,6 +41,7 @@ namespace libtorrent { namespace dht
 {
 	struct TORRENT_EXTRA_EXPORT dht_logger
 	{
+#ifndef TORRENT_DISABLE_LOGGING
 		enum module_t
 		{
 			tracker,
@@ -62,6 +63,7 @@ namespace libtorrent { namespace dht
 
 	protected:
 		~dht_logger() {}
+#endif
 	};
 
 	struct TORRENT_EXTRA_EXPORT dht_observer : dht_logger

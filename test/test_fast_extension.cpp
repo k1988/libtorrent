@@ -32,6 +32,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "test.hpp"
 #include "setup_transfer.hpp"
+#include "settings.hpp"
 #include "test_utils.hpp"
 
 #include "libtorrent/socket.hpp"
@@ -413,9 +414,8 @@ boost::shared_ptr<torrent_info> setup_peer(tcp::socket& s, sha1_hash& ih
 {
 	boost::shared_ptr<torrent_info> t = ::create_torrent();
 	ih = t->info_hash();
-	settings_pack sett;
+	settings_pack sett = settings();
 	sett.set_str(settings_pack::listen_interfaces, "0.0.0.0:48900");
-	sett.set_int(settings_pack::alert_mask, alert::all_categories);
 	sett.set_bool(settings_pack::enable_upnp, false);
 	sett.set_bool(settings_pack::enable_natpmp, false);
 	sett.set_bool(settings_pack::enable_lsd, false);
@@ -424,6 +424,9 @@ boost::shared_ptr<torrent_info> setup_peer(tcp::socket& s, sha1_hash& ih
 	sett.set_int(settings_pack::out_enc_policy, settings_pack::pe_disabled);
 	sett.set_bool(settings_pack::enable_outgoing_utp, false);
 	sett.set_bool(settings_pack::enable_incoming_utp, false);
+#ifndef TORRENT_NO_DEPRECATE
+	sett.set_bool(settings_pack::rate_limit_utp, true);
+#endif
 	ses.reset(new lt::session(sett, lt::session::add_default_plugins));
 
 	error_code ec;
@@ -441,10 +444,7 @@ boost::shared_ptr<torrent_info> setup_peer(tcp::socket& s, sha1_hash& ih
 	if (th) *th = ret;
 
 	// wait for the torrent to be ready
-	if ((flags & add_torrent_params::flag_seed_mode) == 0)
-	{
-		wait_for_downloading(*ses, "ses");
-	}
+	wait_for_downloading(*ses, "ses");
 
 	if (incoming)
 	{
@@ -453,7 +453,7 @@ boost::shared_ptr<torrent_info> setup_peer(tcp::socket& s, sha1_hash& ih
 	}
 	else
 	{
-		tcp::acceptor l(s.get_io_service());
+		tcp::acceptor l(lt::get_io_service(s));
 		l.open(tcp::v4());
 		l.bind(tcp::endpoint(address_v4::from_string("127.0.0.1")
 			, 3000 + rand() % 60000));

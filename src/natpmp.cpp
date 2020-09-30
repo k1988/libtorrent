@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2007-2016, Arvid Norberg
+Copyright (c) 2007-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -89,7 +89,7 @@ void natpmp::start()
 	mutex::scoped_lock l(m_mutex);
 
 	error_code ec;
-	address gateway = get_default_gateway(m_socket.get_io_service(), ec);
+	address gateway = get_default_gateway(lt::get_io_service(m_socket), ec);
 	if (ec)
 	{
 		char msg[200];
@@ -430,6 +430,8 @@ void natpmp::on_reply(error_code const& e
 		return;
 	}
 
+	if (m_abort) return;
+
 #if defined TORRENT_ASIO_DEBUGGING
 	add_outstanding_async("natpmp::on_reply");
 #endif
@@ -581,8 +583,6 @@ void natpmp::on_reply(error_code const& e
 			, errors::no_error);
 		l.lock();
 	}
-
-	if (m_abort) return;
 
 	m_currently_mapping = -1;
 	m->action = mapping_t::action_none;

@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2003-2016, Arvid Norberg
+Copyright (c) 2003-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -49,9 +49,18 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <boost/weak_ptr.hpp>
 #include <boost/tuple/tuple.hpp>
 #include <boost/unordered_map.hpp>
+#include <boost/optional.hpp>
+#include <boost/noncopyable.hpp>
 
 #ifdef TORRENT_USE_OPENSSL
-#include <boost/asio/ssl/context.hpp>
+// there is no forward declaration header for asio
+namespace boost {
+namespace asio {
+namespace ssl {
+	struct context;
+}
+}
+}
 #endif
 
 #include "libtorrent/aux_/disable_warnings_pop.hpp"
@@ -103,6 +112,7 @@ namespace libtorrent
 			, triggered_manually(false)
 			, downloadRate(-1)
 			, uploadRate(-1)
+			, second_announce(false)
 #ifdef TORRENT_USE_OPENSSL
 			, ssl_ctx(0)
 #endif
@@ -153,12 +163,14 @@ namespace libtorrent
 
 		boost::uint32_t key;
 		int num_want;
+
+		address_v4 ipv4;
 #if TORRENT_USE_IPV6
 		address_v6 ipv6;
 #endif
 		sha1_hash info_hash;
 		peer_id pid;
-		address bind_ip;
+		boost::optional<address> bind_ip;
 
 		bool send_stats;
 
@@ -172,6 +184,11 @@ namespace libtorrent
 
 		boost::int64_t downloadRate;
 		boost::int64_t uploadRate;
+		// this is set when announcing to the next address family. There are only
+		// two address families now, so when this is set, we won't trigger another
+		// automatic announce
+		bool second_announce;
+
 #ifdef TORRENT_USE_OPENSSL
 		boost::asio::ssl::context* ssl_ctx;
 #endif
@@ -184,7 +201,7 @@ namespace libtorrent
 	{
 		tracker_response()
 			: interval(1800)
-			, min_interval(120)
+			, min_interval(1)
 			, complete(-1)
 			, pure_bt_speed(200)
 			, seed_speed_policy(0)
@@ -278,7 +295,7 @@ namespace libtorrent
 		virtual void on_timeout(error_code const& ec) = 0;
 		virtual ~timeout_handler() {}
 
-		io_service& get_io_service() { return m_timeout.get_io_service(); }
+		io_service& get_io_service() { return lt::get_io_service(m_timeout); }
 
 	private:
 
@@ -325,7 +342,6 @@ namespace libtorrent
 			, int interval = 0, int min_interval = 0);
 		virtual void start() = 0;
 		virtual void close();
-		address const& bind_interface() const { return m_req.bind_ip; }
 		void sent_bytes(int bytes);
 		void received_bytes(int bytes);
 		virtual bool on_receive(error_code const&, udp::endpoint const&

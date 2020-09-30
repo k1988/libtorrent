@@ -42,8 +42,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/alert_types.hpp"
 #include "libtorrent/create_torrent.hpp"
 #include "libtorrent/socket_io.hpp" // print_endpoint
-#include "libtorrent/socket_type.hpp"
-#include "libtorrent/instantiate_connection.hpp"
 #include "libtorrent/ip_filter.hpp"
 #include "libtorrent/session_stats.hpp"
 #include "libtorrent/thread.hpp"
@@ -51,6 +49,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/torrent_info.hpp"
 #include "libtorrent/broadcast_socket.hpp" // for supports_ipv6()
 
+#include <boost/algorithm/cxx11/any_of.hpp>
 #include <boost/tuple/tuple.hpp>
 #include <boost/bind.hpp>
 #include <boost/make_shared.hpp>
@@ -58,11 +57,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "test.hpp"
 #include "test_utils.hpp"
 #include "setup_transfer.hpp"
-
-#ifdef TORRENT_USE_OPENSSL
-#include <boost/asio/ssl/stream.hpp>
-#include <boost/asio/ssl/context.hpp>
-#endif
 
 #ifndef _WIN32
 #include <spawn.h>
@@ -79,6 +73,31 @@ namespace lt = libtorrent;
 #if defined TORRENT_WINDOWS
 #include <conio.h>
 #endif
+
+boost::shared_ptr<lt::torrent_info> generate_torrent()
+{
+	file_storage fs;
+	fs.add_file("test/tmp1", 128 * 1024 * 8);
+	fs.add_file("test/tmp2", 128 * 1024);
+	fs.add_file("test/tmp3", 128 * 1024);
+	lt::create_torrent t(fs, 128 * 1024, 6);
+
+	t.add_tracker("http://torrent_file_tracker.com/announce");
+	t.add_url_seed("http://torrent_file_url_seed.com/");
+
+	int num = t.num_pieces();
+	TEST_CHECK(num > 0);
+	for (int i = 0; i < num; ++i)
+	{
+		sha1_hash ph;
+		for (int k = 0; k < 20; ++k) ph[k] = lt::random();
+		t.set_hash(i, ph);
+	}
+
+	std::vector<char> buf;
+	bencode(std::back_inserter(buf), t.generate());
+	return boost::make_shared<torrent_info>(&buf[0], buf.size());
+}
 
 boost::uint32_t g_addr = 0x92343023;
 
@@ -151,9 +170,10 @@ std::map<std::string, boost::int64_t> get_counters(libtorrent::session& s)
 	return ret;
 }
 
-alert const* wait_for_alert(lt::session& ses, int type, char const* name, int num)
+alert const* wait_for_alert(lt::session& ses, int type, char const* name, int num
+	, lt::time_duration timeout)
 {
-	time_point end = libtorrent::clock_type::now() + seconds(10);
+	time_point end = libtorrent::clock_type::now() + timeout;
 	while (true)
 	{
 		time_point now = clock_type::now();
@@ -175,7 +195,7 @@ alert const* wait_for_alert(lt::session& ses, int type, char const* name, int nu
 				--num;
 			}
 		}
-		if (num == 0) return ret;
+		if (num <= 0) return ret;
 	}
 	return NULL;
 }
@@ -259,36 +279,38 @@ void save_file(char const* filename, char const* data, int size)
 		fprintf(stderr, "ERROR writing file '%s': %s\n", filename, ec.message().c_str());
 		return;
 	}
-
 }
 
 bool print_alerts(lt::session& ses, char const* name
 	, bool allow_disconnects, bool allow_no_torrents, bool allow_failed_fastresume
-	, boost::function<bool(libtorrent::alert const*)> predicate, bool no_output)
+	, boost::function<bool(libtorrent::alert const*)> const& predicate, bool no_output)
 {
-	bool ret = false;
-	std::vector<torrent_handle> handles = ses.get_torrents();
-	TEST_CHECK(!handles.empty() || allow_no_torrents);
-	torrent_handle h;
-	if (!handles.empty()) h = handles[0];
+	TEST_CHECK(!ses.get_torrents().empty() || allow_no_torrents);
 	std::vector<alert*> alerts;
 	ses.pop_alerts(&alerts);
 	for (std::vector<alert*>::iterator i = alerts.begin(); i != alerts.end(); ++i)
 	{
-		if (predicate && predicate(*i)) ret = true;
 		if (peer_disconnected_alert const* p = alert_cast<peer_disconnected_alert>(*i))
 		{
 			fprintf(stdout, "%s: %s: [%s] (%s): %s\n", time_now_string(), name, (*i)->what(), print_endpoint(p->ip).c_str(), p->message().c_str());
 		}
-		else if ((*i)->message() != "block downloading"
-			&& (*i)->message() != "block finished"
-			&& (*i)->message() != "piece finished"
-			&& !no_output)
+		else if ((*i)->type() == invalid_request_alert::alert_type)
+		{
+			fprintf(stdout, "peer error: %s\n", (*i)->message().c_str());
+			TEST_CHECK(false);
+		}
+		else if ((*i)->type() == fastresume_rejected_alert::alert_type)
+		{
+			fprintf(stdout, "resume data error: %s\n", (*i)->message().c_str());
+			TEST_CHECK(allow_failed_fastresume);
+		}
+		else if (!no_output
+			&& (*i)->type() != block_downloading_alert::alert_type
+			&& (*i)->type() != block_finished_alert::alert_type
+			&& (*i)->type() != piece_finished_alert::alert_type)
 		{
 			fprintf(stdout, "%s: %s: [%s] %s\n", time_now_string(), name, (*i)->what(), (*i)->message().c_str());
 		}
-
-		TEST_CHECK(alert_cast<fastresume_rejected_alert>(*i) == 0 || allow_failed_fastresume);
 /*
 		peer_error_alert const* pea = alert_cast<peer_error_alert>(*i);
 		if (pea)
@@ -307,33 +329,22 @@ bool print_alerts(lt::session& ses, char const* name
 				|| (allow_disconnects && pea->error.message() == "End of file."));
 		}
 */
-
-		invalid_request_alert const* ira = alert_cast<invalid_request_alert>(*i);
-		if (ira)
-		{
-			fprintf(stdout, "peer error: %s\n", ira->message().c_str());
-			TEST_CHECK(false);
-		}
 	}
-	return ret;
+	return predicate && boost::algorithm::any_of(alerts.begin(), alerts.end(), predicate);
 }
 
-bool listen_done = false;
 bool listen_alert(libtorrent::alert const* a)
 {
-	if (alert_cast<listen_failed_alert>(a)
-		|| alert_cast<listen_succeeded_alert>(a))
-		listen_done = true;
-	return true;
+	return alert_cast<listen_failed_alert>(a) || alert_cast<listen_succeeded_alert>(a);
 }
 
 void wait_for_listen(lt::session& ses, char const* name)
 {
-	listen_done = false;
 	alert const* a = 0;
+	bool listen_done = false;
 	do
 	{
-		print_alerts(ses, name, true, true, true, &listen_alert, false);
+		listen_done = print_alerts(ses, name, true, true, true, listen_alert, false);
 		if (listen_done) break;
 		a = ses.wait_for_alert(milliseconds(500));
 	} while (a);
@@ -341,23 +352,20 @@ void wait_for_listen(lt::session& ses, char const* name)
 	TEST_CHECK(listen_done);
 }
 
-bool downloading_done = false;
 bool downloading_alert(libtorrent::alert const* a)
 {
 	state_changed_alert const* sc = alert_cast<state_changed_alert>(a);
-	if (sc && sc->state == torrent_status::downloading)
-		downloading_done = true;
-	return true;
+	return sc && sc->state == torrent_status::downloading;
 }
 
 void wait_for_downloading(lt::session& ses, char const* name)
 {
-	time_point start = clock_type::now();
-	downloading_done = false;
+	time_point const start = clock_type::now();
+	bool downloading_done = false;
 	alert const* a = 0;
 	do
 	{
-		print_alerts(ses, name, true, true, true, &downloading_alert, false);
+		downloading_done = print_alerts(ses, name, true, true, true, downloading_alert, false);
 		if (downloading_done) break;
 		if (total_seconds(clock_type::now() - start) > 10) break;
 		a = ses.wait_for_alert(seconds(2));
@@ -431,15 +439,6 @@ struct proxy_t
 // maps port to proxy type
 static std::map<int, proxy_t> running_proxies;
 
-void stop_proxy(int port)
-{
-	fprintf(stdout, "stopping proxy on port %d\n", port);
-	// don't shut down proxies until the test is
-	// completely done. This saves a lot of time.
-	// they're closed at the end of main() by
-	// calling stop_all_proxies().
-}
-
 // returns 0 on failure, otherwise pid
 pid_type async_run(char const* cmdline)
 {
@@ -496,7 +495,9 @@ void stop_process(pid_type p)
 {
 #ifdef _WIN32
 	HANDLE proc = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, p);
+	if (proc == NULL) return;
 	TerminateProcess(proc, 138);
+	WaitForSingleObject(proc, 5000);
 	CloseHandle(proc);
 #else
 	printf("killing pid: %d\n", p);
@@ -504,14 +505,26 @@ void stop_process(pid_type p)
 #endif
 }
 
+void stop_proxy(int port)
+{
+	std::map<int, proxy_t>::iterator const it = running_proxies.find(port);
+
+	if (it == running_proxies.end()) return;
+
+	fprintf(stdout, "stopping proxy on port %d\n", port);
+
+	stop_process(it->second.pid);
+	running_proxies.erase(it);
+}
+
 void stop_all_proxies()
 {
 	std::map<int, proxy_t> proxies = running_proxies;
+	running_proxies.clear();
 	for (std::map<int, proxy_t>::iterator i = proxies.begin()
-		, end(proxies.end()); i != end; ++i)
+		, end = proxies.end(); i != end; ++i)
 	{
 		stop_process(i->second.pid);
-		running_proxies.erase(i->second.pid);
 	}
 }
 
@@ -595,7 +608,8 @@ boost::shared_ptr<T> clone_ptr(boost::shared_ptr<T> const& ptr)
 unsigned char random_byte()
 { return std::rand() & 0xff; }
 
-void create_random_files(std::string const& path, const int file_sizes[], int num_files)
+void create_random_files(std::string const& path, const int file_sizes[], int num_files
+	, file_storage* fs)
 {
 	error_code ec;
 	char* random_data = (char*)malloc(300000);
@@ -609,10 +623,14 @@ void create_random_files(std::string const& path, const int file_sizes[], int nu
 
 		std::string full_path = combine_path(path, dirname);
 		error_code ec;
-		create_directory(full_path, ec);
+		lt::create_directories(full_path, ec);
+		if (ec) fprintf(stderr, "create_directory(%s) failed: (%d) %s\n"
+			, full_path.c_str(), ec.value(), ec.message().c_str());
+
 		full_path = combine_path(full_path, filename);
 
 		int to_write = file_sizes[i];
+		if (fs) fs->add_file(full_path, to_write);
 		file f(full_path, file::write_only, ec);
 		if (ec) fprintf(stderr, "failed to create file \"%s\": (%d) %s\n"
 			, full_path.c_str(), ec.value(), ec.message().c_str());
@@ -726,34 +744,24 @@ setup_transfer(lt::session* ses1, lt::session* ses2, lt::session* ses3
 	ses2->set_peer_class_filter(f);
 	if (ses3) ses3->set_peer_class_filter(f);
 
+	const int mask = alert::all_categories
+		& ~(alert::progress_notification
+			| alert::piece_progress_notification
+			| alert::block_progress_notification
+			| alert::performance_warning
+			| alert::stats_notification
+			| alert::picker_log_notification);
 	settings_pack pack;
-	pack.set_int(settings_pack::alert_mask, ~(alert::progress_notification | alert::stats_notification));
+	pack.set_int(settings_pack::alert_mask, mask);
 	if (ses3) pack.set_bool(settings_pack::allow_multiple_connections_per_ip, true);
 	pack.set_int(settings_pack::mixed_mode_algorithm, settings_pack::prefer_tcp);
 	pack.set_int(settings_pack::max_failcount, 1);
-	peer_id pid;
-	std::generate(&pid[0], &pid[0] + 20, random_byte);
-	pack.set_str(settings_pack::peer_fingerprint, pid.to_string());
 	ses1->apply_settings(pack);
-	TORRENT_ASSERT(ses1->id() == pid);
-
-	std::generate(&pid[0], &pid[0] + 20, random_byte);
-	TORRENT_ASSERT(ses1->id() != pid);
-	pack.set_str(settings_pack::peer_fingerprint, pid.to_string());
 	ses2->apply_settings(pack);
-	TORRENT_ASSERT(ses2->id() == pid);
 	if (ses3)
 	{
-		std::generate(&pid[0], &pid[0] + 20, random_byte);
-		TORRENT_ASSERT(ses1->id() != pid);
-		TORRENT_ASSERT(ses2->id() != pid);
-		pack.set_str(settings_pack::peer_fingerprint, pid.to_string());
 		ses3->apply_settings(pack);
-		TORRENT_ASSERT(ses3->id() == pid);
 	}
-
-	TORRENT_ASSERT(ses1->id() != ses2->id());
-	if (ses3) TORRENT_ASSERT(ses3->id() != ses2->id());
 
 	boost::shared_ptr<torrent_info> t;
 	if (torrent == 0)

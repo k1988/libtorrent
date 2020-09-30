@@ -33,6 +33,7 @@ DOCS_IMAGES = \
   docs/disk_cache.png             \
   docs/utp_stack.diagram          \
   docs/utp_stack.png              \
+  docs/bitcoin.png                \
   docs/style.css                  \
   docs/rst.css                    \
   docs/img/bg.png                 \
@@ -115,13 +116,21 @@ EXTRA_DIST = \
   Jamfile \
   Jamroot.jam \
   CMakeLists.txt \
+  test/CMakeLists.txt \
   setup.py \
+  LibtorrentRasterbarConfig.cmake.in \
   LICENSE \
   README.rst \
+  cmake/Modules/FindLibGcrypt.cmake \
+  cmake/Modules/GeneratePkgConfig.cmake \
+  cmake/Modules/LibtorrentMacros.cmake \
+  cmake/Modules/ucm_flags.cmake \
+  cmake/Modules/GeneratePkgConfig/generate-pkg-config.cmake.in \
+  cmake/Modules/GeneratePkgConfig/pkg-config.cmake.in \
+  cmake/Modules/GeneratePkgConfig/target-compile-settings.cmake.in \
   $(DOCS_PAGES) \
   $(DOCS_IMAGES) \
   $(ED25519_SOURCE)
 
 pkgconfigdir   = $(libdir)/pkgconfig
 pkgconfig_DATA = libtorrent-rasterbar.pc
-

@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2012-2016, Arvid Norberg
+Copyright (c) 2012-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -149,7 +149,7 @@ namespace libtorrent
 		SET_NOPREV(proxy_username, "", &session_impl::update_proxy),
 		SET_NOPREV(proxy_password, "", &session_impl::update_proxy),
 		SET_NOPREV(i2p_hostname, "", &session_impl::update_i2p_bridge),
-		SET_NOPREV(peer_fingerprint, "-LT1130-", &session_impl::update_peer_fingerprint),
+		SET_NOPREV(peer_fingerprint, "-LT11E0-", 0),
 		SET_NOPREV(dht_bootstrap_nodes, "dht.libtorrent.org:25401", &session_impl::update_dht_bootstrap_nodes)
 	};
 
@@ -166,8 +166,17 @@ namespace libtorrent
 		DEPRECATED_SET(use_write_cache, true, 0),
 		DEPRECATED_SET(dont_flush_write_cache, false, 0),
 		DEPRECATED_SET(explicit_read_cache, false, 0),
+#ifdef TORRENT_WINDOWS
+		// the emulation of preadv/pwritev uses overlapped reads/writes to be able
+		// to issue them all back to back. However, it appears windows fail to
+		// merge them. At least for people reporting performance issues in
+		// qBittorrent
+		SET(coalesce_reads, true, 0),
+		SET(coalesce_writes, true, 0),
+#else
 		SET(coalesce_reads, false, 0),
 		SET(coalesce_writes, false, 0),
+#endif
 		SET(auto_manage_prefer_seeds, false, 0),
 		SET(dont_count_slow_torrents, true, &session_impl::update_count_slow),
 		SET(close_redundant_connections, true, 0),
@@ -196,7 +205,7 @@ namespace libtorrent
 		SET(no_recheck_incomplete_resume, false, 0),
 		SET(anonymous_mode, false, &session_impl::update_anonymous_mode),
 		SET(report_web_seed_downloads, true, &session_impl::update_report_web_seed_downloads),
-		DEPRECATED_SET(rate_limit_utp, false, &session_impl::update_rate_limit_utp),
+		DEPRECATED_SET(rate_limit_utp, true, &session_impl::update_rate_limit_utp),
 		SET(announce_double_nat, false, 0),
 		SET(seeding_outgoing_connections, true, 0),
 		SET(no_connect_privileged_ports, false, &session_impl::update_privileged_ports),
@@ -213,7 +222,7 @@ namespace libtorrent
 		SET(support_merkle_torrents, true, 0),
 		SET(report_redundant_bytes, true, 0),
 		SET_NOPREV(listen_system_port_fallback, true, 0),
-		SET(use_disk_cache_pool, true, 0),
+		SET(use_disk_cache_pool, false, 0),
 		SET(disable_seed_download, false, 0),
 		SET_NOPREV(announce_crypto_support, true, 0),
 		SET_NOPREV(enable_upnp, true, &session_impl::update_upnp),
@@ -247,7 +256,7 @@ namespace libtorrent
 		SET(max_failcount, 3, &session_impl::update_max_failcount),
 		SET(min_reconnect_time, 60, 0),
 		SET(peer_connect_timeout, 15, 0),
-		SET(connection_speed, 10, &session_impl::update_connection_speed),
+		SET(connection_speed, 30, &session_impl::update_connection_speed),
 		SET(inactivity_timeout, 600, 0),
 		SET(unchoke_interval, 15, 0),
 		SET(optimistic_unchoke_interval, 30, 0),
@@ -277,7 +286,7 @@ namespace libtorrent
 		SET(active_dht_limit, 88, 0),
 		SET(active_tracker_limit, 1600, 0),
 		SET(active_lsd_limit, 60, 0),
-		SET(active_limit, 15, &session_impl::trigger_auto_manage),
+		SET(active_limit, 500, &session_impl::trigger_auto_manage),
 		SET_NOPREV(active_loaded_limit, 0, &session_impl::trigger_auto_manage),
 		SET(auto_manage_interval, 30, 0),
 		SET(seed_time_limit, 24 * 60 * 60, 0),
@@ -327,11 +336,11 @@ namespace libtorrent
 		SET(utp_loss_multiplier, 50, 0),
 		SET(mixed_mode_algorithm, settings_pack::peer_proportional, 0),
 		SET(listen_queue_size, 5, 0),
-		SET(torrent_connect_boost, 10, 0),
+		SET(torrent_connect_boost, 30, 0),
 		SET(alert_queue_size, 1000, &session_impl::update_alert_queue_size),
 		SET(max_metadata_size, 3 * 1024 * 10240, 0),
 		DEPRECATED_SET(hashing_threads, 1, 0),
-		SET(checking_mem_usage, 256, 0),
+		SET(checking_mem_usage, 1024, 0),
 		SET(predictive_piece_announce, 0, 0),
 		SET(aio_threads, 4, &session_impl::update_disk_threads),
 		SET(aio_max, 300, 0),
@@ -359,6 +368,7 @@ namespace libtorrent
 		SET_NOPREV(urlseed_max_request_bytes, 16 * 1024 * 1024, 0),
 		SET_NOPREV(web_seed_name_lookup_retry, 1800, 0),
 		SET_NOPREV(close_file_interval, CLOSE_FILE_INTERVAL, &session_impl::update_close_file_interval),
+		SET_NOPREV(utp_cwnd_reduce_timer, 100, 0),
 	};
 
 #undef SET
@@ -470,6 +480,28 @@ namespace libtorrent
 		{
 			if (bool_settings[i].default_value == s.m_bools[i]) continue;
 			sett[bool_settings[i].name] = s.m_bools[i];
+		}
+	}
+
+	void run_all_updates(aux::session_impl& ses)
+	{
+		typedef void (aux::session_impl::*fun_t)();
+		for (int i = 0; i < settings_pack::num_string_settings; ++i)
+		{
+			fun_t const& f = str_settings[i].fun;
+			if (f) (ses.*f)();
+		}
+
+		for (int i = 0; i < settings_pack::num_int_settings; ++i)
+		{
+			fun_t const& f = int_settings[i].fun;
+			if (f) (ses.*f)();
+		}
+
+		for (int i = 0; i < settings_pack::num_bool_settings; ++i)
+		{
+			fun_t const& f = bool_settings[i].fun;
+			if (f) (ses.*f)();
 		}
 	}
 

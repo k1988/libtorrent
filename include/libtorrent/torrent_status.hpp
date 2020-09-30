@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2015-2016, Arvid Norberg
+Copyright (c) 2015-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -118,12 +118,12 @@ namespace libtorrent
 			checking_resume_data
 		};
 
+#ifndef TORRENT_NO_DEPRECATE
 		// may be set to an error code describing why the torrent was paused, in
 		// case it was paused by an error. If the torrent is not paused or if it's
 		// paused but not because of an error, this error_code is not set.
 		// if the error is attributed specifically to a file, error_file is set to
 		// the index of that file in the .torrent file.
-#ifndef TORRENT_NO_DEPRECATE
 		std::string error;
 #else
 		// internal
@@ -146,7 +146,10 @@ namespace libtorrent
 
 			// the error occurred while loading the .torrent file via the user
 			// supplied load function
-			error_file_metadata = -4
+			error_file_metadata = -4,
+
+			// the error occurred with the partfile
+			error_file_partfile = -5
 		};
 
 		// the path to the directory where this torrent's files are stored.

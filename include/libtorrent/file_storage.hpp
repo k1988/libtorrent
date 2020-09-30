@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2003-2016, Arvid Norberg
+Copyright (c) 2003-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -582,6 +582,8 @@ namespace libtorrent
 		void apply_pointer_offset(ptrdiff_t off);
 
 	private:
+
+		int get_or_add_path(char const* branch_path, int branch_len);
 
 		void add_pad_file(int size
 			, std::vector<internal_file_entry>::iterator& i

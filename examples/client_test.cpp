@@ -51,9 +51,9 @@ POSSIBILITY OF SUCH DAMAGE.
 #pragma warning(pop)
 #endif
 
-#include "libtorrent/extensions/ut_metadata.hpp"
-#include "libtorrent/extensions/ut_pex.hpp"
-#include "libtorrent/extensions/smart_ban.hpp"
+#ifdef TORRENT_UTP_LOG_ENABLE
+#include "libtorrent/utp_stream.hpp"
+#endif
 
 #include "libtorrent/torrent_info.hpp"
 #include "libtorrent/announce_entry.hpp"
@@ -625,6 +625,7 @@ std::string bind_to_interface = "";
 int poll_interval = 5;
 int max_connections_per_torrent = 50;
 bool seed_mode = false;
+bool stats_enabled = false;
 int cache_size = 1024;
 
 bool share_mode = false;
@@ -762,13 +763,10 @@ std::vector<std::string> list_dir(std::string path
 		return ret;
 	}
 
-	struct dirent de;
-	dirent* dummy;
-	while (readdir_r(handle, &de, &dummy) == 0)
+	struct dirent* de;
+	while ((de = readdir(handle)))
 	{
-		if (dummy == 0) break;
-
-		std::string p = de.d_name;
+		std::string p = de->d_name;
 		if (filter_fun(p))
 			ret.push_back(p);
 	}
@@ -917,7 +915,7 @@ bool handle_alert(torrent_view& view, session_view& ses_view
 	{
 		ses_view.update_counters(s->values, sizeof(s->values)/sizeof(s->values[0])
 			, duration_cast<microseconds>(s->timestamp().time_since_epoch()).count());
-		return true;
+		return !stats_enabled;
 	}
 
 #ifndef TORRENT_DISABLE_DHT
@@ -1227,6 +1225,10 @@ int main(int argc, char* argv[])
 			"  -G                    Add torrents in seed-mode (i.e. assume all pieces\n"
 			"                        are present and check hashes on-demand)\n"
 			"  -E <num-threads>      specify how many disk I/O threads to use\n"
+			"  -O                    print session stats counters to the log\n"
+#ifdef TORRENT_UTP_LOG_ENABLE
+			"  -q                    Enable uTP transport-level verbose logging\n"
+#endif
 			"\n BITTORRENT OPTIONS\n"
 			"  -c <limit>            sets the max number of connections\n"
 			"  -T <limit>            sets the max number of connections per torrent\n"
@@ -1287,7 +1289,7 @@ int main(int argc, char* argv[])
 			"URL is a url to a torrent file\n"
 			"\n"
 			"Example for running benchmark:\n\n"
-			"  client_test -k -z -N -h -H -M -l 2000 -S 1000 -T 1000 -c 1000 test.torrent\n");
+			"  client_test -k -z -N -h -H -M -l 2000 -S 1000 -T 1000 -c 1000 -O test.torrent\n");
 			;
 		return 0;
 	}
@@ -1374,6 +1376,7 @@ int main(int argc, char* argv[])
 			case 'B': settings.set_int(settings_pack::peer_timeout, atoi(arg)); break;
 			case 'n': settings.set_bool(settings_pack::announce_to_all_tiers, true); --i; break;
 			case 'G': seed_mode = true; --i; break;
+			case 'O': stats_enabled = true; --i; break;
 			case 'E': settings.set_int(settings_pack::aio_threads, atoi(arg)); break;
 			case 'd': settings.set_int(settings_pack::download_rate_limit, atoi(arg) * 1000); break;
 			case 'u': settings.set_int(settings_pack::upload_rate_limit, atoi(arg) * 1000); break;
@@ -1385,6 +1388,11 @@ int main(int argc, char* argv[])
 				if (strcmp(arg, "allocate") == 0) allocation_mode = storage_mode_allocate;
 				else if (strcmp(arg, "sparse") == 0) allocation_mode = storage_mode_sparse;
 				break;
+#ifdef TORRENT_UTP_LOG_ENABLE
+			case 'q':
+				libtorrent::set_utp_stream_logging(true);
+				break;
+#endif
 			case 's': save_path = arg; break;
 			case 'U': torrent_upload_limit = atoi(arg) * 1000; break;
 			case 'D': torrent_download_limit = atoi(arg) * 1000; break;
@@ -1539,6 +1547,8 @@ int main(int argc, char* argv[])
 	settings.set_str(settings_pack::user_agent, "client_test/" LIBTORRENT_VERSION);
 	settings.set_int(settings_pack::alert_mask, alert::all_categories
 		& ~(alert::dht_notification
+		+ alert::piece_progress_notification
+		+ alert::block_progress_notification
 		+ alert::progress_notification
 		+ alert::stats_notification
 		+ alert::session_log_notification
@@ -1756,7 +1766,11 @@ int main(int argc, char* argv[])
 					ses.async_add_torrent(p);
 				}
 
-				if (c == 'q') break;
+				if (c == 'q')
+				{
+					quit = true;
+					break;
+				}
 
 				if (c == 'W' && h.is_valid())
 				{
@@ -1940,7 +1954,11 @@ int main(int argc, char* argv[])
 				}
 
 			} while (sleep_and_input(&c, 0));
-			if (c == 'q') break;
+			if (c == 'q')
+			{
+				quit = true;
+				break;
+			}
 		}
 
 		// loop through the alert queue to see if anything has happened.
@@ -2048,6 +2066,11 @@ int main(int argc, char* argv[])
 
 			if (print_trackers)
 			{
+				snprintf(str, sizeof(str), "next_announce: %4" PRId64 " | current tracker: %s\x1b[K\n"
+					, boost::int64_t(duration_cast<seconds>(s.next_announce).count())
+					, s.current_tracker.c_str());
+				out += str;
+				pos += 1;
 				std::vector<announce_entry> tr = h.trackers();
 				time_point now = clock_type::now();
 				for (std::vector<announce_entry>::iterator i = tr.begin()

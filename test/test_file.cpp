@@ -201,6 +201,30 @@ TORRENT_TEST(paths)
 	TEST_EQUAL(is_root_path("/"), true);
 #endif
 
+#ifdef TORRENT_WINDOWS
+	TEST_CHECK(compare_path("c:\\blah\\", "c:\\blah"));
+	TEST_CHECK(compare_path("c:\\blah", "c:\\blah"));
+	TEST_CHECK(compare_path("c:\\blah/", "c:\\blah"));
+	TEST_CHECK(compare_path("c:\\blah", "c:\\blah\\"));
+	TEST_CHECK(compare_path("c:\\blah", "c:\\blah"));
+	TEST_CHECK(compare_path("c:\\blah", "c:\\blah/"));
+
+	TEST_CHECK(!compare_path("c:\\bla", "c:\\blah/"));
+	TEST_CHECK(!compare_path("c:\\bla", "c:\\blah"));
+	TEST_CHECK(!compare_path("c:\\blah", "c:\\bla"));
+	TEST_CHECK(!compare_path("c:\\blah\\sdf", "c:\\blah"));
+#else
+	TEST_CHECK(compare_path("/blah", "/blah"));
+	TEST_CHECK(compare_path("/blah/", "/blah"));
+	TEST_CHECK(compare_path("/blah", "/blah"));
+	TEST_CHECK(compare_path("/blah", "/blah/"));
+
+	TEST_CHECK(!compare_path("/bla", "/blah/"));
+	TEST_CHECK(!compare_path("/bla", "/blah"));
+	TEST_CHECK(!compare_path("/blah", "/bla"));
+	TEST_CHECK(!compare_path("/blah/sdf", "/blah"));
+#endif
+
 	// if has_parent_path() returns false
 	// parent_path() should return the empty string
 	TEST_EQUAL(parent_path("blah"), "");
@@ -283,11 +307,7 @@ TORRENT_TEST(file)
 {
 	error_code ec;
 	file f;
-#if TORRENT_USE_UNC_PATHS || !defined WIN32
-	TEST_CHECK(f.open("con", file::read_write, ec));
-#else
 	TEST_CHECK(f.open("test_file", file::read_write, ec));
-#endif
 	if (ec)
 		fprintf(stdout, "open failed: [%s] %s\n", ec.category().name(), ec.message().c_str());
 	TEST_EQUAL(ec, error_code());
@@ -301,6 +321,25 @@ TORRENT_TEST(file)
 	b.iov_base = test_buf;
 	b.iov_len = 4;
 	TEST_EQUAL(f.readv(0, &b, 1, ec), 4);
+	if (ec)
+		fprintf(stdout, "readv failed: [%s] %s\n", ec.category().name(), ec.message().c_str());
+	TEST_EQUAL(ec, error_code());
+	TEST_CHECK(strcmp(test_buf, "test") == 0);
+	f.close();
+
+	TEST_CHECK(f.open("test_file", file::read_only, ec));
+	if (ec)
+		fprintf(stdout, "open failed: [%s] %s\n", ec.category().name(), ec.message().c_str());
+	TEST_EQUAL(ec, error_code());
+	file::iovec_t two_buffers[2];
+
+	std::memset(test_buf, 0, sizeof(test_buf));
+	char test_buf2[5] = {0};
+	two_buffers[0].iov_base = test_buf;
+	two_buffers[0].iov_len = 4;
+	two_buffers[1].iov_base = test_buf2;
+	two_buffers[1].iov_len = 4;
+	TEST_EQUAL(f.readv(0, two_buffers, 2, ec), 4);
 	if (ec)
 		fprintf(stdout, "readv failed: [%s] %s\n", ec.category().name(), ec.message().c_str());
 	TEST_EQUAL(ec, error_code());
@@ -392,3 +431,16 @@ TORRENT_TEST(coalesce_buffer)
 	f.close();
 }
 
+#if 0 && TORRENT_USE_UNC_PATHS
+TORRENT_TEST(unc_paths)
+{
+	std::string const reserved_name = "con";
+	error_code ec;
+	{
+		file f;
+		TEST_CHECK(f.open(reserved_name, file::read_write, ec) && !ec);
+	}
+	remove(reserved_name, ec);
+	TEST_CHECK(!ec);
+}
+#endif

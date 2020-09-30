@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2007-2016, Arvid Norberg
+Copyright (c) 2007-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -42,11 +42,19 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <boost/shared_ptr.hpp>
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/noncopyable.hpp>
+#include <boost/optional.hpp>
 #include <vector>
 #include <string>
 
 #ifdef TORRENT_USE_OPENSSL
-#include <boost/asio/ssl/context.hpp>
+// there is no forward declaration header for asio
+namespace boost {
+namespace asio {
+namespace ssl {
+	struct context;
+}
+}
+}
 #endif
 
 #include "libtorrent/aux_/disable_warnings_pop.hpp"
@@ -106,7 +114,7 @@ struct TORRENT_EXTRA_EXPORT http_connection
 	void get(std::string const& url, time_duration timeout = seconds(30)
 		, int prio = 0, aux::proxy_settings const* ps = NULL, int handle_redirects = 5
 		, std::string const& user_agent = std::string()
-		, address const& bind_addr = address_v4::any()
+		, boost::optional<address> bind_addr = boost::none
 		, int resolve_flags = 0, std::string const& auth_ = std::string()
 #if TORRENT_USE_I2P
 		, i2p_connection* i2p_conn = 0
@@ -116,7 +124,7 @@ struct TORRENT_EXTRA_EXPORT http_connection
 	void start(std::string const& hostname, int port
 		, time_duration timeout, int prio = 0, aux::proxy_settings const* ps = NULL
 		, bool ssl = false, int handle_redirect = 5
-		, address const& bind_addr = address_v4::any()
+		, boost::optional<address> bind_addr = boost::none
 		, int resolve_flags = 0
 #if TORRENT_USE_I2P
 		, i2p_connection* i2p_conn = 0
@@ -192,9 +200,8 @@ private:
 	// configured to use a proxy
 	aux::proxy_settings m_proxy;
 
-	// the address to bind to. address_v4::any()
-	// means do not bind
-	address m_bind_addr;
+	// the address to bind to. unset means do not bind
+	boost::optional<address> m_bind_addr;
 
 	// if username password was passed in, remember it in case we need to
 	// re-issue the request for a redirect

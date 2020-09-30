@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2010-2016, Arvid Norberg
+Copyright (c) 2010-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -793,7 +793,7 @@ cached_piece_entry* block_cache::add_dirty_block(disk_io_job* j)
 // (since these blocks now are part of the read cache) the refcounts of the
 // blocks are also decremented by this function. They are expected to have been
 // incremented by the caller.
-void block_cache::blocks_flushed(cached_piece_entry* pe, int const* flushed, int num_flushed)
+bool block_cache::blocks_flushed(cached_piece_entry* pe, int const* flushed, int num_flushed)
 {
 	TORRENT_PIECE_ASSERT(pe->in_use, pe);
 
@@ -817,7 +817,7 @@ void block_cache::blocks_flushed(cached_piece_entry* pe, int const* flushed, int
 	pe->num_dirty -= num_flushed;
 
 	update_cache_state(pe);
-	maybe_free_piece(pe);
+	return maybe_free_piece(pe);
 }
 
 std::pair<block_cache::iterator, block_cache::iterator> block_cache::all_pieces() const
@@ -1215,7 +1215,20 @@ void block_cache::clear(tailqueue<disk_io_job>& jobs)
 	for (int i = 0; i < cached_piece_entry::num_lrus; ++i)
 		m_lru[i].get_all();
 
-	m_pieces.clear();
+	// it's not ok to erase pieces with a refcount > 0
+	// since we're cancelling all jobs though, it shouldn't be too bad
+	// to let the jobs already running complete.
+	for (cache_t::iterator i = m_pieces.begin(); i != m_pieces.end();)
+	{
+		if (i->refcount == 0 && i->piece_refcount == 0)
+		{
+			i = m_pieces.erase(i);
+		}
+		else
+		{
+			++i;
+		}
+	}
 }
 
 void block_cache::move_to_ghost(cached_piece_entry* pe)

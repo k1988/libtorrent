@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2009-2016, Arvid Norberg
+Copyright (c) 2009-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -54,7 +54,12 @@ namespace sim { namespace asio {
 #endif
 
 namespace boost { namespace asio {
+#if BOOST_VERSION < 106600
 	class io_service;
+#else
+	class io_context;
+	typedef io_context io_service;
+#endif
 }}
 
 namespace libtorrent
@@ -63,6 +68,14 @@ namespace libtorrent
 	typedef sim::asio::io_service io_service;
 #else
 	typedef boost::asio::io_service io_service;
+#endif
+
+#if BOOST_VERSION >= 107000
+template <typename T>
+io_service& get_io_service(T& o) { return static_cast<io_service&>(o.get_executor().context()); }
+#else
+template <typename T>
+io_service& get_io_service(T& o) { return o.get_io_service(); }
 #endif
 }
 

@@ -10,7 +10,7 @@ version = (int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]
 def v(version):
 	ret = ()
 	for i in version:
-		if i < 9: ret = ret + (chr(ord('0') + i),)
+		if i < 10: ret = ret + (chr(ord('0') + i),)
 		else: ret = ret + (chr(ord('A') + i - 10),)
 	return ret
 
@@ -42,6 +42,8 @@ def substitute_file(name):
 			l = "\tversion = '%d.%d.%d',\n" % (version[0], version[1], version[2])
 		elif "version = '" in l and name.endswith('setup.py'):
 			l = "\tversion = '%d.%d.%d',\n" % (version[0], version[1], version[2])
+		elif l.startswith('\tVERSION ') and len(l.split('.')) == 3 and name.endswith('CMakeLists.txt'):
+			l = "\tVERSION %d.%d.%d\n" % (version[0], version[1], version[2])
 		elif '"-LT' in l and name.endswith('settings_pack.cpp'):
 			l = re.sub('"-LT[0-9A-Za-z]{4}-"', '"-LT%c%c%c%c-"' % v(version), l)
 

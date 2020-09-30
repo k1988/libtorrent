@@ -13,7 +13,6 @@
 #include "libtorrent/announce_entry.hpp"
 #include <libtorrent/storage.hpp>
 #include <libtorrent/file_pool.hpp>
-#include <boost/lexical_cast.hpp>
 #include "gil.hpp"
 
 using namespace boost::python;
@@ -340,9 +339,9 @@ namespace
     }
 }
 
-void connect_peer(torrent_handle& th, tuple ip, int source)
+void connect_peer(torrent_handle& th, tuple ip, int source, int flags)
 {
-    th.connect_peer(tuple_to_endpoint(ip), source);
+    th.connect_peer(tuple_to_endpoint(ip), source, flags);
 }
 
 std::vector<pool_file_status> file_status(torrent_handle const& h)
@@ -394,7 +393,7 @@ void add_piece(torrent_handle& th, int piece, char const *data, int flags)
 void bind_torrent_handle()
 {
     // arguments are: number of seconds and tracker index
-    void (torrent_handle::*force_reannounce0)(int, int) const = &torrent_handle::force_reannounce;
+    void (torrent_handle::*force_reannounce0)(int, int, int) const = &torrent_handle::force_reannounce;
 
 #ifndef TORRENT_NO_DEPRECATE
     bool (torrent_handle::*super_seeding0)() const = &torrent_handle::super_seeding;
@@ -426,6 +425,7 @@ void bind_torrent_handle()
         .def(self == self)
         .def(self != self)
         .def(self < self)
+        .def("__hash__", (std::size_t (*)(torrent_handle const&))&libtorrent::hash_value)
         .def("get_peer_info", get_peer_info)
         .def("status", _(&torrent_handle::status), arg("flags") = 0xffffffff)
         .def("get_download_queue", get_download_queue)
@@ -496,7 +496,7 @@ void bind_torrent_handle()
         .def("save_resume_data", _(&torrent_handle::save_resume_data), arg("flags") = 0)
         .def("need_save_resume_data", _(&torrent_handle::need_save_resume_data))
         .def("force_reannounce", _(force_reannounce0)
-            , (arg("seconds") = 0, arg("tracker_idx") = -1))
+            , (arg("seconds") = 0, arg("tracker_idx") = -1, arg("flags") = 0))
 #ifndef TORRENT_DISABLE_DHT
         .def("force_dht_announce", _(&torrent_handle::force_dht_announce))
 #endif
@@ -516,7 +516,7 @@ void bind_torrent_handle()
         .def("set_ratio", _(&torrent_handle::set_ratio))
         .def("save_path", _(&torrent_handle::save_path))
 #endif
-        .def("connect_peer", &connect_peer)
+        .def("connect_peer", &connect_peer, (arg("ip"), arg("source") = 0, arg("flags") = 0xd))
         .def("set_max_uploads", _(&torrent_handle::set_max_uploads))
         .def("max_uploads", _(&torrent_handle::max_uploads))
         .def("set_max_connections", _(&torrent_handle::set_max_connections))
@@ -556,6 +556,10 @@ void bind_torrent_handle()
         .value("flush_disk_cache", torrent_handle::flush_disk_cache)
         .value("save_info_dict", torrent_handle::save_info_dict)
         .value("only_if_modified", torrent_handle::only_if_modified)
+    ;
+
+    enum_<torrent_handle::reannounce_flags_t>("reannounce_flags_t")
+        .value("ignore_min_interval", torrent_handle::ignore_min_interval)
     ;
 
     enum_<torrent_handle::deadline_flags>("deadline_flags")

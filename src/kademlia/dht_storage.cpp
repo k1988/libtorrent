@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2012-2016, Arvid Norberg, Alden Torres
+Copyright (c) 2012-2018, Arvid Norberg, Alden Torres
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -38,6 +38,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <boost/bind.hpp>
 #include <boost/function/function1.hpp>
 #include <boost/tuple/tuple.hpp>
+#include <boost/noncopyable.hpp>
 
 #include "libtorrent/aux_/disable_warnings_pop.hpp"
 

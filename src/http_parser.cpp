@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2008-2016, Arvid Norberg
+Copyright (c) 2008-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -39,6 +39,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/assert.hpp"
 #include "libtorrent/parse_url.hpp" // for parse_url_components
 #include "libtorrent/aux_/escape_string.hpp" // for read_until
+#include "libtorrent/hex.hpp"
 
 using namespace libtorrent;
 
@@ -280,7 +281,8 @@ restart_response:
 				if (name == "content-length")
 				{
 					m_content_length = strtoll(value.c_str(), 0, 10);
-					if (m_content_length < 0)
+					if (m_content_length < 0
+						|| m_content_length == std::numeric_limits<boost::int64_t>::max())
 					{
 						m_state = error_state;
 						error = true;
@@ -303,7 +305,8 @@ restart_response:
 					if (string_begins_no_case("bytes ", ptr)) ptr += 6;
 					char* end;
 					m_range_start = strtoll(ptr, &end, 10);
-					if (m_range_start < 0)
+					if (m_range_start < 0
+						|| m_range_start == std::numeric_limits<boost::int64_t>::max())
 					{
 						m_state = error_state;
 						error = true;
@@ -315,7 +318,8 @@ restart_response:
 					{
 						ptr = end + 1;
 						m_range_end = strtoll(ptr, &end, 10);
-						if (m_range_end < 0)
+						if (m_range_end < 0
+							|| m_range_end == std::numeric_limits<boost::int64_t>::max())
 						{
 							m_state = error_state;
 							error = true;
@@ -369,7 +373,8 @@ restart_response:
 					int header_size;
 					if (parse_chunk_header(buf, &chunk_size, &header_size))
 					{
-						if (chunk_size < 0)
+						if (chunk_size < 0
+							|| chunk_size > std::numeric_limits<boost::int64_t>::max() - m_cur_chunk_end - header_size)
 						{
 							m_state = error_state;
 							error = true;
@@ -385,8 +390,6 @@ restart_response:
 						if (chunk_size == 0)
 						{
 							m_finished = true;
-							TORRENT_ASSERT(m_content_length < 0 || m_recv_pos - m_body_start_pos
-								- m_chunk_header_size == m_content_length);
 						}
 						header_size -= m_partial_chunk_header;
 						m_partial_chunk_header = 0;
@@ -470,14 +473,34 @@ restart_response:
 		// empty line
 
 		// first, read the chunk length
-		*chunk_size = strtoll(pos, 0, 16);
-		if (*chunk_size < 0) return true;
+		boost::int64_t size = 0;
+		for (char const* i = pos; i != newline; ++i)
+		{
+			if (*i == '\r') continue;
+			if (*i == '\n') continue;
+			if (*i == ';') break;
+			int const digit = detail::hex_to_int(*i);
+			if (digit < 0)
+			{
+				*chunk_size = -1;
+				return true;
+			}
+			if (size >= std::numeric_limits<boost::int64_t>::max() / 16)
+			{
+				*chunk_size = -1;
+				return true;
+			}
+			size *= 16;
+			size += digit;
+		}
+		*chunk_size = size;
 
 		if (*chunk_size != 0)
 		{
 			*header_size = newline - buf.begin;
-			// the newline alone is two bytes
-			TORRENT_ASSERT(newline - buf.begin > 2);
+			// the newline is at least 1 byte, and the length-prefix is at least 1
+			// byte
+			TORRENT_ASSERT(newline - buf.begin >= 2);
 			return true;
 		}
 

@@ -40,6 +40,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "test.hpp"
 #include "test_utils.hpp"
 #include "setup_transfer.hpp"
+#include "settings.hpp"
 
 #include "libtorrent/aux_/disable_warnings_push.hpp"
 
@@ -58,10 +59,6 @@ POSSIBILITY OF SUCH DAMAGE.
 using namespace libtorrent;
 using boost::tuples::ignore;
 
-int const alert_mask = alert::all_categories
-& ~alert::progress_notification
-& ~alert::stats_notification;
-
 struct test_config_t
 {
 	char const* name;
@@ -74,7 +71,7 @@ struct test_config_t
 	int ssl_disconnects;
 };
 
-test_config_t test_config[] =
+test_config_t const test_config[] =
 {
 	// name                                                              sslport sd-cert dl-cert dl-port expect peer-error ssl-disconn
 	{"nobody has a cert (connect to regular port)",                      false,  false,  false,  true,   false, 0, 1},
@@ -114,7 +111,7 @@ bool on_alert(alert const* a)
 	return false;
 }
 
-void test_ssl(int test_idx, bool use_utp)
+void test_ssl(int const test_idx, bool const use_utp)
 {
 	// these are declared before the session objects
 	// so that they are destructed last. This enables
@@ -132,8 +129,7 @@ void test_ssl(int test_idx, bool use_utp)
 	remove_all("tmp2_ssl", ec);
 
 	int ssl_port = 1024 + rand() % 50000;
-	settings_pack sett;
-	sett.set_int(settings_pack::alert_mask, alert_mask);
+	settings_pack sett = settings();
 	sett.set_int(settings_pack::max_retry_port_bind, 100);
 	sett.set_str(settings_pack::listen_interfaces, "0.0.0.0:48075");
 	sett.set_bool(settings_pack::enable_incoming_utp, use_utp);
@@ -281,10 +277,13 @@ void test_ssl(int test_idx, bool use_utp)
 
 	fprintf(stderr, "peer_errors: %d expected_errors: %d\n"
 		, peer_errors, test.peer_errors);
-	TEST_EQUAL(peer_errors > 0, test.peer_errors > 0);
 
 	fprintf(stderr, "ssl_disconnects: %d  expected: %d\n", ssl_peer_disconnects, test.ssl_disconnects);
-	TEST_EQUAL(ssl_peer_disconnects > 0, test.ssl_disconnects > 0);
+	if (!use_utp)
+	{
+		TEST_EQUAL(ssl_peer_disconnects > 0, test.ssl_disconnects > 0);
+		TEST_EQUAL(peer_errors > 0, test.peer_errors > 0);
+	}
 
 	fprintf(stderr, "%s: EXPECT: %s\n", time_now_string(), test.expected_to_complete ? "SUCCEESS" : "FAILURE");
 	fprintf(stderr, "%s: RESULT: %s\n", time_now_string(), tor2.status().is_seeding ? "SUCCEESS" : "FAILURE");
@@ -319,7 +318,7 @@ enum attack_flags_t
 	valid_bittorrent_hash = 16,
 };
 
-attack_t attacks[] =
+attack_t const attacks[] =
 {
 	// positive test
 	{ valid_certificate | valid_sni_hash | valid_bittorrent_hash, true},
@@ -363,7 +362,7 @@ bool try_connect(libtorrent::session& ses1, int port
 	// create the SSL context for this torrent. We need to
 	// inject the root certificate, and no other, to
 	// verify other peers against
-	context ctx(ios, context::sslv23);
+	context ctx(context::sslv23);
 
 	ctx.set_options(context::default_workarounds
 		| boost::asio::ssl::context::no_sslv2
@@ -541,8 +540,7 @@ void test_malicious_peer()
 
 	// set up session
 	int ssl_port = 1024 + rand() % 50000;
-	settings_pack sett;
-	sett.set_int(settings_pack::alert_mask, alert_mask);
+	settings_pack sett = settings();
 	sett.set_int(settings_pack::max_retry_port_bind, 100);
 	sett.set_str(settings_pack::listen_interfaces, "0.0.0.0:48075");
 	sett.set_int(settings_pack::ssl_listen, ssl_port);
