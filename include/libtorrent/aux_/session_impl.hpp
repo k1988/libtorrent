@@ -54,6 +54,8 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <boost/unordered_map.hpp>
 #endif
 
+#include <boost/optional.hpp>
+
 #ifdef TORRENT_USE_OPENSSL
 #include "libtorrent/ssl_stream.hpp"
 #endif
@@ -180,10 +182,10 @@ namespace libtorrent
 			typedef std::map<sha1_hash, boost::shared_ptr<torrent> > torrent_map;
 #endif
 
-			session_impl(io_service& ios);
+			session_impl(io_service& ios, settings_pack const& pack);
 			virtual ~session_impl();
 
-			void start_session(settings_pack const& pack);
+			void start_session();
 
 			void set_load_function(user_load_function_t fun)
 			{ m_user_load_torrent = fun; }
@@ -207,8 +209,8 @@ namespace libtorrent
 
 			void open_listen_port();
 
-			torrent_peer_allocator_interface* get_peer_allocator() TORRENT_OVERRIDE
-			{ return &m_peer_allocator; }
+			torrent_peer_allocator_interface& get_peer_allocator() TORRENT_OVERRIDE
+			{ return m_peer_allocator; }
 
 			io_service& get_io_service() TORRENT_OVERRIDE { return m_io_service; }
 			resolver_interface& get_resolver() TORRENT_OVERRIDE { return m_host_resolver; }
@@ -231,8 +233,8 @@ namespace libtorrent
 			// if we are listening on an IPv6 interface
 			// this will return one of the IPv6 addresses on this
 			// machine, otherwise just an empty endpoint
-			tcp::endpoint get_ipv6_interface() const TORRENT_OVERRIDE;
-			tcp::endpoint get_ipv4_interface() const TORRENT_OVERRIDE;
+			boost::optional<tcp::endpoint> get_ipv6_interface() const TORRENT_OVERRIDE;
+			boost::optional<tcp::endpoint> get_ipv4_interface() const TORRENT_OVERRIDE;
 
 			void async_accept(boost::shared_ptr<tcp::acceptor> const& listener, bool ssl);
 			void on_accept_connection(boost::shared_ptr<socket_type> const& s
@@ -262,8 +264,6 @@ namespace libtorrent
 			boost::shared_ptr<torrent> delay_load_torrent(sha1_hash const& info_hash
 				, peer_connection* pc) TORRENT_OVERRIDE;
 			void set_queue_position(torrent* t, int p) TORRENT_OVERRIDE;
-
-			peer_id const& get_peer_id() const TORRENT_OVERRIDE { return m_peer_id; }
 
 			void close_connection(peer_connection* p, error_code const& ec) TORRENT_OVERRIDE;
 
@@ -477,9 +477,9 @@ namespace libtorrent
 
 #ifndef TORRENT_NO_DEPRECATE
 			session_status status() const;
+			peer_id deprecated_get_peer_id() const;
 #endif
 
-			void set_peer_id(peer_id const& id);
 			void set_key(int key);
 			address listen_address() const;
 			boost::uint16_t listen_port() const TORRENT_OVERRIDE;
@@ -577,10 +577,12 @@ namespace libtorrent
 			virtual void announce(sha1_hash const& ih, address const& addr, int port) TORRENT_OVERRIDE;
 			virtual void outgoing_get_peers(sha1_hash const& target
 				, sha1_hash const& sent_target, udp::endpoint const& ep) TORRENT_OVERRIDE;
+#ifndef TORRENT_DISABLE_LOGGING
 			virtual void log(libtorrent::dht::dht_logger::module_t m, char const* fmt, ...)
 				TORRENT_OVERRIDE TORRENT_FORMAT(3,4);
 			virtual void log_packet(message_direction_t dir, char const* pkt, int len
 				, udp::endpoint node) TORRENT_OVERRIDE;
+#endif
 
 			virtual bool on_dht_request(char const* query, int query_len
 				, dht::msg const& request, entry& response) TORRENT_OVERRIDE;
@@ -618,6 +620,9 @@ namespace libtorrent
 			{ return &m_utp_socket_manager; }
 			void inc_boost_connections() TORRENT_OVERRIDE { ++m_boost_connections; }
 
+			// the settings for the client
+			aux::session_settings m_settings;
+
 #ifndef TORRENT_NO_DEPRECATE
 			// the time when the next rss feed needs updating
 			time_point m_next_rss_update;
@@ -652,7 +657,6 @@ namespace libtorrent
 			void update_lsd();
 			void update_dht();
 			void update_count_slow();
-			void update_peer_fingerprint();
 			void update_dht_bootstrap_nodes();
 
 			void update_socket_buffer_size();
@@ -682,7 +686,7 @@ namespace libtorrent
 
 			peer_class_pool m_classes;
 
-			void init(boost::shared_ptr<settings_pack> pack);
+			void init();
 
 			void submit_disk_jobs();
 
@@ -690,9 +694,6 @@ namespace libtorrent
 
 			void on_lsd_peer(tcp::endpoint peer, sha1_hash const& ih);
 			void setup_socket_buffers(socket_type& s) TORRENT_OVERRIDE;
-
-			// the settings for the client
-			aux::session_settings m_settings;
 
 			counters m_stats_counters;
 
@@ -834,9 +835,6 @@ namespace libtorrent
 			// filters outgoing connections
 			port_filter m_port_filter;
 
-			// the peer id that is generated at the start of the session
-			peer_id m_peer_id;
-
 			// this is the highest queue position of any torrent
 			// in this session. queue positions are packed (i.e. there
 			// are no gaps). If there are no torrents with queue positions
@@ -870,8 +868,8 @@ namespace libtorrent
 			// if we're listening on an IPv6 interface
 			// this is one of the non local IPv6 interfaces
 			// on this machine
-			tcp::endpoint m_ipv6_interface;
-			tcp::endpoint m_ipv4_interface;
+			boost::optional<tcp::endpoint> m_ipv6_interface;
+			boost::optional<tcp::endpoint> m_ipv4_interface;
 
 			// since we might be listening on multiple interfaces
 			// we might need more than one listen socket

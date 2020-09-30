@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2009-2016, Arvid Norberg
+Copyright (c) 2009-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -87,6 +87,7 @@ namespace libtorrent
 		int connect_timeout() const { return m_sett.get_int(settings_pack::utp_connect_timeout); }
 		int min_timeout() const { return m_sett.get_int(settings_pack::utp_min_timeout); }
 		int loss_multiplier() const { return m_sett.get_int(settings_pack::utp_loss_multiplier); }
+		int cwnd_reduce_timer() const { return m_sett.get_int(settings_pack::utp_cwnd_reduce_timer); }
 
 		void mtu_for_dest(address const& addr, int& link_mtu, int& utp_mtu);
 		void set_sock_buf(int size);
@@ -121,11 +122,10 @@ namespace libtorrent
 		typedef std::multimap<boost::uint16_t, utp_socket_impl*> socket_map_t;
 		socket_map_t m_utp_sockets;
 
-		// this is a list of sockets that needs to send an ack.
-		// once the UDP socket is drained, all of these will
-		// have a chance to do that. This is to avoid sending
-		// an ack for every single packet
-		std::vector<utp_socket_impl*> m_deferred_acks;
+		// if this is set, it means this socket still needs to send an ACK. Once
+		// we exit the loop processing packets, or switch to processing packets
+		// for a different socket, issue the ACK packet and clear this.
+		utp_socket_impl* m_deferred_ack;
 
 		// sockets that have received or sent packets this
 		// round, may subscribe to the event of draining the

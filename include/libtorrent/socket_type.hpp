@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2009-2016, Arvid Norberg
+Copyright (c) 2009-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -190,6 +190,10 @@ namespace libtorrent
 		typedef tcp::socket::protocol_type protocol_type;
 
 		typedef tcp::socket::receive_buffer_size receive_buffer_size;
+
+#if BOOST_VERSION >= 106600
+		using executor_type = tcp::socket::executor_type;
+#endif
 		typedef tcp::socket::send_buffer_size send_buffer_size;
 
 		explicit socket_type(io_service& ios): m_io_service(ios), m_type(0) {}
@@ -266,6 +270,14 @@ namespace libtorrent
 		template <class SettableSocketOption>
 		error_code set_option(SettableSocketOption const& opt, error_code& ec)
 		{ TORRENT_SOCKTYPE_FORWARD_RET(set_option(opt, ec), ec) }
+
+		void non_blocking(bool b, error_code& ec)
+		{ TORRENT_SOCKTYPE_FORWARD(non_blocking(b, ec)) }
+
+#ifndef BOOST_NO_EXCEPTIONS
+		void non_blocking(bool b)
+		{ TORRENT_SOCKTYPE_FORWARD(non_blocking(b)) }
+#endif
 
 #ifndef BOOST_NO_EXCEPTIONS
 		template <class GettableSocketOption>

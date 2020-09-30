@@ -41,6 +41,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "test.hpp"
 #include "setup_transfer.hpp"
+#include "settings.hpp"
 #include "swarm_suite.hpp"
 
 void test_swarm(int flags)
@@ -69,17 +70,11 @@ void test_swarm(int flags)
 	session_proxy p2;
 	session_proxy p3;
 
-	const int mask = alert::all_categories
-		& ~(alert::progress_notification
-			| alert::performance_warning
-			| alert::stats_notification);
-
-	settings_pack pack;
+	settings_pack pack = settings();
 	pack.set_bool(settings_pack::enable_lsd, false);
 	pack.set_bool(settings_pack::enable_natpmp, false);
 	pack.set_bool(settings_pack::enable_upnp, false);
 	pack.set_bool(settings_pack::enable_dht, false);
-	pack.set_int(settings_pack::alert_mask, mask);
 	pack.set_bool(settings_pack::allow_multiple_connections_per_ip, true);
 
 	if (flags & strict_super_seeding)
@@ -175,8 +170,8 @@ void test_swarm(int flags)
 	TEST_CHECK(tor2.status().is_seeding);
 	TEST_CHECK(tor3.status().is_seeding);
 
-	float average2 = sum_dl_rate2 / float(count_dl_rates2);
-	float average3 = sum_dl_rate3 / float(count_dl_rates3);
+	float average2 = count_dl_rates2 ? sum_dl_rate2 / float(count_dl_rates2) : 0.f;
+	float average3 = count_dl_rates3 ? sum_dl_rate3 / float(count_dl_rates3) : 0.f;
 
 	std::cerr << average2 << std::endl;
 	std::cerr << "average rate: " << (average2 / 1000.f) << "kB/s - "

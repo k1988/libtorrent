@@ -34,7 +34,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #define TORRENT_SESSION_INTERFACE_HPP_INCLUDED
 
 #include "libtorrent/config.hpp"
-#include "libtorrent/peer_id.hpp"
 #include "libtorrent/address.hpp"
 #include "libtorrent/io_service.hpp"
 #include "libtorrent/disk_buffer_holder.hpp"
@@ -49,13 +48,22 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include <boost/weak_ptr.hpp>
 #include <boost/function.hpp>
+#include <boost/optional.hpp>
 
 #ifndef TORRENT_DISABLE_LOGGING
 #include <boost/shared_ptr.hpp>
+#include <cstdarg> // for va_list
 #endif
 
 #ifdef TORRENT_USE_OPENSSL
-#include <boost/asio/ssl/context.hpp>
+// there is no forward declaration header for asio
+namespace boost {
+namespace asio {
+namespace ssl {
+	struct context;
+}
+}
+}
 #endif
 
 #include "libtorrent/aux_/disable_warnings_pop.hpp"
@@ -152,7 +160,7 @@ namespace libtorrent { namespace aux
 
 		virtual alert_manager& alerts() = 0;
 
-		virtual torrent_peer_allocator_interface* get_peer_allocator() = 0;
+		virtual torrent_peer_allocator_interface& get_peer_allocator() = 0;
 		virtual io_service& get_io_service() = 0;
 		virtual resolver_interface& get_resolver() = 0;
 
@@ -195,8 +203,6 @@ namespace libtorrent { namespace aux
 		virtual void insert_uuid_torrent(std::string uuid, boost::shared_ptr<torrent> const& t) = 0;
 		virtual void set_queue_position(torrent* t, int p) = 0;
 		virtual int num_torrents() const = 0;
-
-		virtual peer_id const& get_peer_id() const = 0;
 
 		// cork a peer and schedule a delayed uncork
 		// does nothing if the peer is already corked
@@ -248,8 +254,8 @@ namespace libtorrent { namespace aux
 
 		virtual void prioritize_connections(boost::weak_ptr<torrent> t) = 0;
 
-		virtual tcp::endpoint get_ipv6_interface() const = 0;
-		virtual tcp::endpoint get_ipv4_interface() const = 0;
+		virtual boost::optional<tcp::endpoint> get_ipv6_interface() const = 0;
+		virtual boost::optional<tcp::endpoint> get_ipv4_interface() const = 0;
 
 		virtual void trigger_auto_manage() = 0;
 

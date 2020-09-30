@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2003-2016, Arvid Norberg
+Copyright (c) 2003-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -121,8 +121,9 @@ namespace
 
 namespace libtorrent
 {
-	peer_list::peer_list()
+	peer_list::peer_list(torrent_peer_allocator_interface& alloc)
 		: m_locked_peer(NULL)
+		, m_peer_allocator(alloc)
 		, m_num_seeds(0)
 		, m_finished(0)
 		, m_round_robin(0)
@@ -130,6 +131,15 @@ namespace libtorrent
 		, m_max_failcount(3)
 	{
 		thread_started();
+	}
+
+	peer_list::~peer_list()
+	{
+		for (peers_t::iterator i = m_peers.begin()
+			, end(m_peers.end()); i != end; ++i)
+		{
+			m_peer_allocator.free_peer_entry(*i);
+		}
 	}
 
 	void peer_list::set_max_failcount(torrent_state* state)
@@ -301,7 +311,7 @@ namespace libtorrent
 		(*i)->in_use = false;
 #endif
 
-		state->peer_allocator->free_peer_entry(*i);
+		m_peer_allocator.free_peer_entry(*i);
 		m_peers.erase(i);
 	}
 
@@ -630,7 +640,7 @@ namespace libtorrent
 
 			if (i->connection != 0)
 			{
-				bool self_connection =
+				bool const self_connection =
 					i->connection->remote() == c.local_endpoint()
 					|| i->connection->local_endpoint() == c.remote();
 
@@ -661,57 +671,41 @@ namespace libtorrent
 					// disconnect the same one, we need a consistent rule to
 					// select which one.
 
-					bool outgoing1 = c.is_outgoing();
+					bool const outgoing1 = c.is_outgoing();
 
-					// for this, we compare our endpoints (IP and port)
-					// and whoever has the lower IP,port should be the
-					// one keeping its outgoing connection. Since outgoing
-					// ports are selected at random by the OS, we need
-					// to be careful to only look at the target end of a
-					// connection for the endpoint.
+					// for this, we compare our ports and whoever has the lower port
+					// should be the one keeping its outgoing connection. Since
+					// outgoing ports are selected at random by the OS, we need to
+					// be careful to only look at the target end of a connection for
+					// the endpoint.
 
-					int our_port = outgoing1 ? i->connection->local_endpoint().port() : c.local_endpoint().port();
-					int other_port= outgoing1 ? c.remote().port() : i->connection->remote().port();
+					int const our_port = outgoing1 ? i->connection->local_endpoint().port() : c.local_endpoint().port();
+					int const other_port = outgoing1 ? c.remote().port() : i->connection->remote().port();
 
-					if (our_port < other_port)
-					{
+					// decide which peer connection to disconnect
+					// if the ports are equal, pick on at random
+					bool const disconnect1 = ((our_port < other_port) && !outgoing1)
+						|| ((our_port > other_port) && outgoing1)
+						|| ((our_port == other_port) && randint(2));
+
 #ifndef TORRENT_DISABLE_LOGGING
-						c.peer_log(peer_log_alert::info, "DUPLICATE_PEER_RESOLUTION"
-							, "\"%d\" < \"%d\"", our_port, other_port);
-						i->connection->peer_log(peer_log_alert::info, "DUPLICATE_PEER_RESOLUTION"
-							, "\"%d\" < \"%d\"", our_port, other_port);
+					c.peer_log(peer_log_alert::info, "DUPLICATE_PEER_RESOLUTION"
+						, "our: %d other: %d disconnecting: %s"
+						, our_port, other_port, disconnect1 ? "yes" : "no");
+					i->connection->peer_log(peer_log_alert::info, "DUPLICATE_PEER_RESOLUTION"
+						, "our: %d other: %d disconnecting: %s"
+						, our_port, other_port, disconnect1 ? "no" : "yes");
 #endif
 
-						// we should keep our outgoing connection
-						if (!outgoing1)
-						{
-							c.disconnect(errors::duplicate_peer_id, op_bittorrent);
-							return false;
-						}
-						TORRENT_ASSERT(m_locked_peer == NULL);
-						m_locked_peer = i;
-						i->connection->disconnect(errors::duplicate_peer_id, op_bittorrent);
-						m_locked_peer = NULL;
-					}
-					else
+					if (disconnect1)
 					{
-#ifndef TORRENT_DISABLE_LOGGING
-						c.peer_log(peer_log_alert::info, "DUPLICATE_PEER_RESOLUTION"
-							, "\"%d\" >= \"%d\"", our_port, other_port);
-						i->connection->peer_log(peer_log_alert::info, "DUPLICATE_PEER_RESOLUTION"
-							, "\"%d\" >= \"%d\"", our_port, other_port);
-#endif
-						// they should keep their outgoing connection
-						if (outgoing1)
-						{
-							c.disconnect(errors::duplicate_peer_id, op_bittorrent);
-							return false;
-						}
-						TORRENT_ASSERT(m_locked_peer == NULL);
-						m_locked_peer = i;
-						i->connection->disconnect(errors::duplicate_peer_id, op_bittorrent);
-						m_locked_peer = NULL;
+						c.disconnect(errors::duplicate_peer_id, op_bittorrent);
+						return false;
 					}
+					TORRENT_ASSERT(m_locked_peer == NULL);
+					m_locked_peer = i;
+					i->connection->disconnect(errors::duplicate_peer_id, op_bittorrent);
+					m_locked_peer = NULL;
 				}
 			}
 
@@ -745,7 +739,7 @@ namespace libtorrent
 #else
 			bool is_v6 = false;
 #endif
-			torrent_peer* p = state->peer_allocator->allocate_peer_entry(
+			torrent_peer* p = m_peer_allocator.allocate_peer_entry(
 				is_v6 ? torrent_peer_allocator_interface::ipv6_peer_type
 				: torrent_peer_allocator_interface::ipv4_peer_type);
 			if (p == 0) return false;
@@ -1030,7 +1024,7 @@ namespace libtorrent
 		{
 			// we don't have any info about this peer.
 			// add a new entry
-			p = state->peer_allocator->allocate_peer_entry(torrent_peer_allocator_interface::i2p_peer_type);
+			p = m_peer_allocator.allocate_peer_entry(torrent_peer_allocator_interface::i2p_peer_type);
 			if (p == NULL) return NULL;
 			new (p) i2p_peer(destination, true, src);
 
@@ -1044,7 +1038,7 @@ namespace libtorrent
 				p->in_use = false;
 #endif
 
-				state->peer_allocator->free_peer_entry(p);
+				m_peer_allocator.free_peer_entry(p);
 				return 0;
 			}
 		}
@@ -1106,7 +1100,7 @@ namespace libtorrent
 #else
 			bool is_v6 = false;
 #endif
-			p = state->peer_allocator->allocate_peer_entry(
+			p = m_peer_allocator.allocate_peer_entry(
 				is_v6 ? torrent_peer_allocator_interface::ipv6_peer_type
 				: torrent_peer_allocator_interface::ipv4_peer_type);
 			if (p == NULL) return NULL;
@@ -1127,7 +1121,8 @@ namespace libtorrent
 #if TORRENT_USE_ASSERTS
 				p->in_use = false;
 #endif
-				state->peer_allocator->free_peer_entry(p);
+				// TODO: 3 this is not exception safe!
+				m_peer_allocator.free_peer_entry(p);
 				return 0;
 			}
 			state->first_time_seen = true;

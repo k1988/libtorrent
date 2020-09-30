@@ -7,7 +7,6 @@ nobase_include_HEADERS = \
   alert_manager.hpp            \
   alert_types.hpp              \
   alloca.hpp                   \
-  allocator.hpp                \
   announce_entry.hpp           \
   assert.hpp                   \
   bandwidth_limit.hpp          \
@@ -175,6 +174,7 @@ nobase_include_HEADERS = \
   aux_/file_progress.hpp            \
   aux_/openssl.hpp                  \
   aux_/byteswap.hpp                 \
+  aux_/route.h                      \
   \
   extensions/lt_trackers.hpp        \
   extensions/metadata_transfer.hpp  \

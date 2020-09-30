@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2006-2016, Arvid Norberg, Magnus Jonsson
+Copyright (c) 2006-2018, Arvid Norberg, Magnus Jonsson
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -107,6 +107,8 @@ POSSIBILITY OF SUCH DAMAGE.
 // for logging stat layout
 #include "libtorrent/stat.hpp"
 
+#include <cstdarg> // for va_list
+
 // for logging the size of DHT structures
 #ifndef TORRENT_DISABLE_DHT
 #include <libtorrent/kademlia/find_data.hpp>
@@ -150,8 +152,13 @@ namespace
 #include <openssl/crypto.h>
 #include <openssl/rand.h>
 
-namespace
-{
+// by openssl changelog at https://www.openssl.org/news/changelog.html
+// Changes between 1.0.2h and 1.1.0  [25 Aug 2016]
+// - Most global cleanup functions are no longer required because they are handled
+//   via auto-deinit. Affected function CRYPTO_cleanup_all_ex_data()
+#if !defined(OPENSSL_API_COMPAT) || OPENSSL_API_COMPAT < 0x10100000L
+namespace {
+
 	// openssl requires this to clean up internal
 	// structures it allocates
 	struct openssl_cleanup
@@ -159,6 +166,7 @@ namespace
 		~openssl_cleanup() { CRYPTO_cleanup_all_ex_data(); }
 	} openssl_global_destructor;
 }
+#endif
 
 #endif // TORRENT_USE_OPENSSL
 
@@ -237,7 +245,7 @@ namespace aux {
 			{"0.0.0.0", "255.255.255.255", gfilter},
 			// local networks
 			{"10.0.0.0", "10.255.255.255", lfilter},
-			{"172.16.0.0", "172.16.255.255", lfilter},
+			{"172.16.0.0", "172.31.255.255", lfilter},
 			{"192.168.0.0", "192.168.255.255", lfilter},
 			// link-local
 			{"169.254.0.0", "169.254.255.255", lfilter},
@@ -250,6 +258,8 @@ namespace aux {
 		{
 			// everything
 			{"::0", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", gfilter},
+			// local networks
+			{"fc00::", "fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", lfilter},
 			// link-local
 			{"fe80::", "febf::ffff:ffff:ffff:ffff:ffff:ffff:ffff", lfilter},
 			// loop-back
@@ -330,21 +340,20 @@ namespace aux {
 	} // anonymous namesoace
 #endif
 
-	session_impl::session_impl(io_service& ios)
-		:
+	session_impl::session_impl(io_service& ios, settings_pack const& pack)
+		: m_settings(pack)
 #ifndef TORRENT_NO_DEPRECATE
-		m_next_rss_update(min_time())
-		,
+		, m_next_rss_update(min_time())
 #endif
 #ifndef TORRENT_DISABLE_POOL_ALLOCATOR
-		m_send_buffers(send_buffer_size())
-		,
+		, m_send_buffers(send_buffer_size())
 #endif
-		m_io_service(ios)
+		, m_io_service(ios)
 #ifdef TORRENT_USE_OPENSSL
-		, m_ssl_ctx(m_io_service, boost::asio::ssl::context::sslv23)
+		, m_ssl_ctx(boost::asio::ssl::context::sslv23)
 #endif
-		, m_alerts(m_settings.get_int(settings_pack::alert_queue_size), alert::all_categories)
+		, m_alerts(m_settings.get_int(settings_pack::alert_queue_size)
+			, m_settings.get_int(settings_pack::alert_mask))
 #ifndef TORRENT_NO_DEPRECATE
 		, m_alert_pointer_pos(0)
 #endif
@@ -442,19 +451,15 @@ namespace aux {
 		TORRENT_ASSERT_VAL(!ec, ec);
 
 		update_time_now();
+		m_disk_thread.set_settings(&pack, m_alerts);
 	}
 
 	// This function is called by the creating thread, not in the message loop's
 	// / io_service thread.
 	// TODO: 2 is there a reason not to move all of this into init()? and just
 	// post it to the io_service?
-	void session_impl::start_session(settings_pack const& pack)
+	void session_impl::start_session()
 	{
-		if (pack.has_val(settings_pack::alert_mask))
-		{
-			m_alerts.set_alert_mask(pack.get_int(settings_pack::alert_mask));
-		}
-
 #ifndef TORRENT_DISABLE_LOGGING
 		session_log("start session");
 #endif
@@ -506,9 +511,6 @@ namespace aux {
 		m_peer_class_type_filter.add(peer_class_type_filter::ssl_tcp_socket, m_tcp_peer_class);
 		m_peer_class_type_filter.add(peer_class_type_filter::i2p_socket, m_tcp_peer_class);
 
-		// TODO: there's no rule here to make uTP connections not have the global or
-		// local rate limits apply to it. This used to be the default.
-
 #ifndef TORRENT_DISABLE_LOGGING
 
 		session_log("config: %s version: %s revision: %s"
@@ -530,17 +532,13 @@ namespace aux {
 #ifndef TORRENT_DISABLE_LOGGING
 		session_log("   max connections: %d", m_settings.get_int(settings_pack::connections_limit));
 		session_log("   max files: %d", max_files);
-
-		session_log(" generated peer ID: %s", m_peer_id.to_string().c_str());
 #endif
 
-		boost::shared_ptr<settings_pack> copy = boost::make_shared<settings_pack>(pack);
-		m_io_service.post(boost::bind(&session_impl::init, this, copy));
+		m_io_service.post(boost::bind(&session_impl::init, this));
 	}
 
-	void session_impl::init(boost::shared_ptr<settings_pack> pack)
+	void session_impl::init()
 	{
-		INVARIANT_CHECK;
 		// this is a debug facility
 		// see single_threaded in debug.hpp
 		thread_started();
@@ -598,32 +596,20 @@ namespace aux {
 		session_log(" done starting session");
 #endif
 
-		apply_settings_pack(pack);
+		// apply all m_settings to this session
+		run_all_updates(*this);
 
-		// call update_* after settings set initialized
-
-#ifndef TORRENT_NO_DEPRECATE
-		update_local_download_rate();
-		update_local_upload_rate();
-#endif
-		update_download_rate();
-		update_upload_rate();
-		update_connections_limit();
-		update_unchoke_limit();
-		update_disk_threads();
-		update_network_threads();
-		update_upnp();
-		update_natpmp();
-		update_lsd();
-		update_dht();
-		update_peer_fingerprint();
-		update_dht_bootstrap_nodes();
+		// this applies unchoke settings from m_settings
+		recalculate_unchoke_slots();
 
 		if (m_listen_sockets.empty())
 		{
 			update_listen_interfaces();
 			open_listen_port();
 		}
+#if TORRENT_USE_INVARIANT_CHECKS
+		check_invariant();
+#endif
 	}
 
 	void session_impl::async_resolve(std::string const& host, int flags
@@ -908,7 +894,7 @@ namespace aux {
 		}
 
 #ifndef TORRENT_DISABLE_DHT
-		if (need_update_dht) update_dht();
+		if (need_update_dht) start_dht();
 #endif
 #ifndef TORRENT_NO_DEPRECATE
 		if (need_update_proxy) update_proxy();
@@ -1290,21 +1276,21 @@ namespace aux {
 		return m_classes.new_peer_class(name);
 	}
 
-	void session_impl::delete_peer_class(int cid)
+	void session_impl::delete_peer_class(peer_class_t const cid)
 	{
 		TORRENT_ASSERT(is_single_thread());
 		// if you hit this assert, you're deleting a non-existent peer class
-		TORRENT_ASSERT(m_classes.at(cid));
+		TORRENT_ASSERT_PRECOND(m_classes.at(cid));
 		if (m_classes.at(cid) == 0) return;
 		m_classes.decref(cid);
 	}
 
-	peer_class_info session_impl::get_peer_class(int cid)
+	peer_class_info session_impl::get_peer_class(peer_class_t const cid)
 	{
 		peer_class_info ret;
 		peer_class* pc = m_classes.at(cid);
 		// if you hit this assert, you're passing in an invalid cid
-		TORRENT_ASSERT(pc);
+		TORRENT_ASSERT_PRECOND(pc);
 		if (pc == 0)
 		{
 #ifdef TORRENT_DEBUG
@@ -1333,8 +1319,8 @@ namespace aux {
 
 #ifdef TORRENT_USE_OPENSSL
 		// SSL torrents use the SSL listen port
-		if (req.ssl_ctx) req.listen_port = ssl_listen_port();
-		req.ssl_ctx = &m_ssl_ctx;
+		if (req.ssl_ctx && req.ssl_ctx != &m_ssl_ctx) req.listen_port = ssl_listen_port();
+		else req.ssl_ctx = &m_ssl_ctx;
 #endif
 #if TORRENT_USE_I2P
 		if (!m_settings.get_str(settings_pack::i2p_hostname).empty())
@@ -1343,15 +1329,19 @@ namespace aux {
 		}
 #endif
 
-		if (is_any(req.bind_ip)) req.bind_ip = m_listen_interface.address();
+		if (!req.bind_ip
+			&& m_listen_interface.address() != address_v4::any())
+		{
+			req.bind_ip = m_listen_interface.address();
+		}
 		m_tracker_manager.queue_request(get_io_service(), req, c);
 	}
 
-	void session_impl::set_peer_class(int cid, peer_class_info const& pci)
+	void session_impl::set_peer_class(peer_class_t const cid, peer_class_info const& pci)
 	{
 		peer_class* pc = m_classes.at(cid);
 		// if you hit this assert, you're passing in an invalid cid
-		TORRENT_ASSERT(pc);
+		TORRENT_ASSERT_PRECOND(pc);
 		if (pc == 0) return;
 
 		pc->set_info(&pci);
@@ -1700,12 +1690,12 @@ namespace aux {
 	}
 #endif
 
-	tcp::endpoint session_impl::get_ipv6_interface() const
+	boost::optional<tcp::endpoint> session_impl::get_ipv6_interface() const
 	{
 		return m_ipv6_interface;
 	}
 
-	tcp::endpoint session_impl::get_ipv4_interface() const
+	boost::optional<tcp::endpoint> session_impl::get_ipv4_interface() const
 	{
 		return m_ipv4_interface;
 	}
@@ -1878,8 +1868,8 @@ retry:
 
 		if (m_abort) return;
 
-		m_ipv6_interface = tcp::endpoint();
-		m_ipv4_interface = tcp::endpoint();
+		m_ipv6_interface = boost::none;
+		m_ipv4_interface = boost::none;
 
 		// TODO: instead of having a special case for this, just make the
 		// default listen interfaces be "0.0.0.0:6881,[::]:6881" and use
@@ -1950,18 +1940,6 @@ retry:
 			}
 #endif // TORRENT_USE_IPV6
 
-			// set our main IPv4 and IPv6 interfaces
-			// used to send to the tracker
-			std::vector<ip_interface> ifs = enum_net_interfaces(m_io_service, ec);
-			for (std::vector<ip_interface>::const_iterator i = ifs.begin()
-					, end(ifs.end()); i != end; ++i)
-			{
-				address const& addr = i->interface_address;
-				if (addr.is_v6() && !is_local(addr) && !is_loopback(addr))
-					m_ipv6_interface = tcp::endpoint(addr, m_listen_interface.port());
-				else if (addr.is_v4() && !is_local(addr) && !is_loopback(addr))
-					m_ipv4_interface = tcp::endpoint(addr, m_listen_interface.port());
-			}
 		}
 		else
 		{
@@ -1972,7 +1950,7 @@ retry:
 			for (int i = 0; i < m_listen_interfaces.size(); ++i)
 			{
 				std::string const& device = m_listen_interfaces[i].first;
-				int port = m_listen_interfaces[i].second;
+				int const port = m_listen_interfaces[i].second;
 
 				int num_device_fails = 0;
 
@@ -2020,7 +1998,6 @@ retry:
 #endif
 							m_ipv4_interface = bind_ep;
 					}
-
 #ifdef TORRENT_USE_OPENSSL
 					if (m_settings.get_int(settings_pack::ssl_listen))
 					{
@@ -2062,6 +2039,38 @@ retry:
 				goto retry;
 			}
 			return;
+		}
+
+#if TORRENT_USE_IPV6
+		bool want_v6 = (m_ipv6_interface && is_any(m_ipv6_interface->address()))
+			|| m_listen_interfaces.empty();
+#else
+		bool const want_v6 = false;
+#endif
+		bool want_v4 = (m_ipv4_interface && is_any(m_ipv4_interface->address()))
+			|| m_listen_interfaces.empty();
+		if (want_v6 || want_v4)
+		{
+			// set our main IPv4 and IPv6 interfaces
+			// used to send to the tracker
+			std::vector<ip_interface> ifs = enum_net_interfaces(m_io_service, ec);
+			for (std::vector<ip_interface>::const_iterator i = ifs.begin()
+					, end(ifs.end()); i != end && (want_v4 || want_v6); ++i)
+			{
+				address const& addr = i->interface_address;
+				if (want_v4 && addr.is_v4() && !is_local(addr) && !is_loopback(addr))
+				{
+					m_ipv4_interface = tcp::endpoint(addr, m_listen_interface.port());
+					want_v4 = false;
+				}
+#if TORRENT_USE_IPV6
+				else if (want_v6 && addr.is_v6() && !is_local(addr) && !is_loopback(addr))
+				{
+					m_ipv6_interface = tcp::endpoint(addr, m_listen_interface.port());
+					want_v6 = false;
+				}
+#endif
+			}
 		}
 
 #ifdef TORRENT_USE_OPENSSL
@@ -2500,6 +2509,10 @@ retry:
 		}
 		async_accept(listener, ssl);
 
+		// don't accept any connections from our local sockets
+		if (m_settings.get_bool(settings_pack::force_proxy))
+			return;
+
 #ifdef TORRENT_USE_OPENSSL
 		if (ssl)
 		{
@@ -2792,8 +2805,7 @@ retry:
 		pack.peerinfo = 0;
 
 		boost::shared_ptr<peer_connection> c
-			= boost::make_shared<bt_peer_connection>(boost::cref(pack)
-				, get_peer_id());
+			= boost::make_shared<bt_peer_connection>(boost::cref(pack));
 #if TORRENT_USE_ASSERTS
 		c->m_in_constructor = false;
 #endif
@@ -2859,10 +2871,12 @@ retry:
 		if (i != m_connections.end()) m_connections.erase(i);
 	}
 
-	void session_impl::set_peer_id(peer_id const& id)
+#ifndef TORRENT_NO_DEPRECATE
+	peer_id session_impl::deprecated_get_peer_id() const
 	{
-		m_peer_id = id;
+		return generate_peer_id(m_settings);
 	}
+#endif
 
 	void session_impl::set_key(int key)
 	{
@@ -3046,10 +3060,13 @@ retry:
 
 		// we have to keep ticking the utp socket manager
 		// until they're all closed
+		// we also have to keep updating the aux time while
+		// there are outstanding announces
 		if (m_abort)
 		{
 			if (m_utp_socket_manager.num_sockets() == 0
-				&& m_undead_peers.empty())
+				&& m_undead_peers.empty()
+				&& m_tracker_manager.empty())
 				return;
 #if defined TORRENT_ASIO_DEBUGGING
 			fprintf(stderr, "uTP sockets left: %d undead-peers left: %d\n"
@@ -3532,6 +3549,9 @@ retry:
 	void session_impl::add_dht_node(udp::endpoint n)
 	{
 		TORRENT_ASSERT(is_single_thread());
+#if !TORRENT_USE_IPV6
+		if (!n.address().is_v4()) return;
+#endif
 
 		if (m_dht) m_dht->add_node(n);
 		else m_dht_nodes.push_back(n);
@@ -4026,16 +4046,14 @@ retry:
 		// attempt this tick
 		int max_connections = m_settings.get_int(settings_pack::connection_speed);
 
-		// zero connections speeds are allowed, we just won't make any connections
-		if (max_connections <= 0) return;
-
 		// this loop will "hand out" connection_speed to the torrents, in a round
 		// robin fashion, so that every torrent is equally likely to connect to a
 		// peer
 
 		// boost connections are connections made by torrent connection
 		// boost, which are done immediately on a tracker response. These
-		// connections needs to be deducted from this second
+		// connections needs to be deducted from the regular connection attempt
+		// quota for this tick
 		if (m_boost_connections > 0)
 		{
 			if (m_boost_connections > max_connections)
@@ -4049,6 +4067,9 @@ retry:
 				m_boost_connections = 0;
 			}
 		}
+
+		// zero connections speeds are allowed, we just won't make any connections
+		if (max_connections <= 0) return;
 
 		// TODO: use a lower limit than m_settings.connections_limit
 		// to allocate the to 10% or so of connection slots for incoming
@@ -4158,7 +4179,6 @@ retry:
 	void session_impl::recalculate_unchoke_slots()
 	{
 		TORRENT_ASSERT(is_single_thread());
-		INVARIANT_CHECK;
 
 		time_point const now = aux::time_now();
 		time_duration const unchoke_interval = now - m_last_choke;
@@ -4871,8 +4891,7 @@ retry:
 
 	std::pair<boost::shared_ptr<torrent>, bool>
 	session_impl::add_torrent_impl(
-		add_torrent_params& params
-		, error_code& ec)
+		add_torrent_params& params, error_code& ec)
 	{
 		TORRENT_ASSERT(!params.save_path.empty());
 
@@ -5054,10 +5073,18 @@ retry:
 
 	void session_impl::update_outgoing_interfaces()
 	{
-		std::string net_interfaces = m_settings.get_str(settings_pack::outgoing_interfaces);
+		std::string const net_interfaces = m_settings.get_str(settings_pack::outgoing_interfaces);
 
 		// declared in string_util.hpp
 		parse_comma_separated_string(net_interfaces, m_net_interfaces);
+
+#ifndef TORRENT_DISABLE_LOGGING
+		if (!net_interfaces.empty() && m_net_interfaces.empty())
+		{
+			session_log("ERROR: failed to parse outgoing interface list: %s"
+				, net_interfaces.c_str());
+		}
+#endif
 	}
 
 	tcp::endpoint session_impl::bind_outgoing_socket(socket_type& s, address
@@ -5250,13 +5277,18 @@ retry:
 	void session_impl::update_listen_interfaces()
 	{
 
-		std::string net_interfaces = m_settings.get_str(settings_pack::listen_interfaces);
+		std::string const net_interfaces = m_settings.get_str(settings_pack::listen_interfaces);
 		std::vector<std::pair<std::string, int> > new_listen_interfaces;
 
 		// declared in string_util.hpp
 		parse_comma_separated_string_port(net_interfaces, new_listen_interfaces);
 
 #ifndef TORRENT_DISABLE_LOGGING
+		if (!net_interfaces.empty() && new_listen_interfaces.empty())
+		{
+			session_log("ERROR: failed to parse listen_interfaces setting: %s"
+				, net_interfaces.c_str());
+		}
 		session_log("update listen interfaces: %s", net_interfaces.c_str());
 #endif
 
@@ -5370,7 +5402,7 @@ retry:
 		}
 		error_code ec;
 		m_close_file_timer.expires_from_now(seconds(interval), ec);
-		m_close_file_timer.async_wait(make_tick_handler(boost::bind(&session_impl::on_close_file, this, _1)));
+		m_close_file_timer.async_wait(boost::bind(&session_impl::on_close_file, this, _1));
 	}
 
 	void session_impl::update_proxy()
@@ -5410,32 +5442,40 @@ retry:
 	{
 #ifndef TORRENT_DISABLE_DHT
 		if (m_settings.get_bool(settings_pack::enable_dht))
-			start_dht();
+		{
+			if (!m_settings.get_str(settings_pack::dht_bootstrap_nodes).empty()
+				&& m_dht_router_nodes.empty())
+			{
+				// if we have bootstrap nodes configured, make sure we initiate host
+				// name lookups. once these complete, the DHT will be started.
+				// they are tracked by m_outstanding_router_lookups
+				update_dht_bootstrap_nodes();
+			}
+			else
+			{
+				start_dht();
+			}
+		}
 		else
 			stop_dht();
 #endif
 	}
 
-	void session_impl::update_peer_fingerprint()
-	{
-		// ---- generate a peer id ----
-		std::string print = m_settings.get_str(settings_pack::peer_fingerprint);
-		if (print.size() > 20) print.resize(20);
-
-		// the client's fingerprint
-		std::copy(print.begin(), print.begin() + print.length(), m_peer_id.begin());
-		if (print.length() < 20)
-		{
-			url_random(m_peer_id.data() + print.length(), m_peer_id.data() + 20);
-		}
-	}
-
 	void session_impl::update_dht_bootstrap_nodes()
 	{
 #ifndef TORRENT_DISABLE_DHT
+		if (!m_settings.get_bool(settings_pack::enable_dht)) return;
+
 		std::string const& node_list = m_settings.get_str(settings_pack::dht_bootstrap_nodes);
 		std::vector<std::pair<std::string, int> > nodes;
 		parse_comma_separated_string_port(node_list, nodes);
+
+#ifndef TORRENT_DISABLE_LOGGING
+		if (!node_list.empty() && nodes.empty())
+		{
+			session_log("ERROR: failed to parse DHT bootstrap list: %s", node_list.c_str());
+		}
+#endif
 
 		for (int i = 0; i < nodes.size(); ++i)
 		{
@@ -5471,7 +5511,16 @@ retry:
 		// potentially identify us if it is leaked elsewere
 		if (m_settings.get_bool(settings_pack::force_proxy)) return 0;
 		if (m_listen_sockets.empty()) return 0;
+#ifdef TORRENT_USE_OPENSSL
+		for (std::list<listen_socket_t>::const_iterator i = m_listen_sockets.begin()
+			, end(m_listen_sockets.end()); i != end; ++i)
+		{
+			if (!i->ssl) return i->external_port;
+		}
+		return 0;
+#else
 		return m_listen_sockets.front().external_port;
+#endif
 	}
 
 	boost::uint16_t session_impl::ssl_listen_port() const
@@ -5737,6 +5786,8 @@ retry:
 
 		stop_dht();
 
+		if (!m_settings.get_bool(settings_pack::enable_dht)) return;
+
 		// postpone starting the DHT if we're still resolving the DHT router
 		if (m_outstanding_router_lookups > 0) return;
 
@@ -5856,7 +5907,7 @@ retry:
 				m_alerts.emplace_alert<dht_error_alert>(
 					dht_error_alert::hostname_lookup, e);
 
-			if (m_outstanding_router_lookups == 0) update_dht();
+			if (m_outstanding_router_lookups == 0) start_dht();
 			return;
 		}
 
@@ -5864,13 +5915,16 @@ retry:
 		for (std::vector<address>::const_iterator i = addresses.begin()
 			, end(addresses.end()); i != end; ++i)
 		{
+#if !TORRENT_USE_IPV6
+			if (!i->is_v4()) continue;
+#endif
 			// router nodes should be added before the DHT is started (and bootstrapped)
 			udp::endpoint ep(*i, port);
 			if (m_dht) m_dht->add_router_node(ep);
 			m_dht_router_nodes.push_back(ep);
 		}
 
-		if (m_outstanding_router_lookups == 0) update_dht();
+		if (m_outstanding_router_lookups == 0) start_dht();
 	}
 
 	// callback for dht_immutable_get
@@ -6191,7 +6245,7 @@ retry:
 	{
 		return download_rate_limit(m_global_class);
 	}
-#endif
+#endif // DEPRECATE
 
 	// TODO: 2 this should be factored into the udp socket, so we only have the
 	// code once
@@ -6257,7 +6311,7 @@ retry:
 
 	void session_impl::update_queued_disk_bytes()
 	{
-		boost::uint64_t cache_size = m_settings.get_int(settings_pack::cache_size);
+		boost::uint64_t const cache_size = m_settings.get_int(settings_pack::cache_size);
 		if (m_settings.get_int(settings_pack::max_queued_disk_bytes) / 16 / 1024
 			> cache_size / 2
 			&& cache_size > 5
@@ -6455,7 +6509,6 @@ retry:
 		}
 
 		if (m_upnp) m_upnp->set_user_agent("");
-		url_random(m_peer_id.data(), m_peer_id.data() + 20);
 	}
 
 	void session_impl::update_force_proxy()
@@ -6465,22 +6518,23 @@ retry:
 		m_ssl_udp_socket.set_force_proxy(m_settings.get_bool(settings_pack::force_proxy));
 #endif
 
-		if (!m_settings.get_bool(settings_pack::force_proxy)) return;
+		if (!m_settings.get_bool(settings_pack::force_proxy))
+		{
+#ifndef TORRENT_DISABLE_LOGGING
+			session_log("force-proxy disabled");
+#endif
+			return;
+		}
+
+#ifndef TORRENT_DISABLE_LOGGING
+		session_log("force-proxy enabled");
+#endif
 
 		// enable force_proxy mode. We don't want to accept any incoming
 		// connections, except through a proxy.
 		stop_lsd();
 		stop_upnp();
 		stop_natpmp();
-#ifndef TORRENT_DISABLE_DHT
-		stop_dht();
-#endif
-		// close the listen sockets
-		error_code ec;
-		for (std::list<listen_socket_t>::iterator i = m_listen_sockets.begin()
-			, end(m_listen_sockets.end()); i != end; ++i)
-			i->sock->close(ec);
-		m_listen_sockets.clear();
 	}
 
 #ifndef TORRENT_NO_DEPRECATE
@@ -6607,25 +6661,17 @@ retry:
 		if (m_settings.get_bool(settings_pack::rate_limit_utp))
 		{
 			// allow the global or local peer class to limit uTP peers
-			m_peer_class_type_filter.add(peer_class_type_filter::utp_socket
-				, m_local_peer_class);
-			m_peer_class_type_filter.add(peer_class_type_filter::utp_socket
+			m_peer_class_type_filter.allow(peer_class_type_filter::utp_socket
 				, m_global_class);
-			m_peer_class_type_filter.add(peer_class_type_filter::ssl_utp_socket
-				, m_local_peer_class);
-			m_peer_class_type_filter.add(peer_class_type_filter::ssl_utp_socket
+			m_peer_class_type_filter.allow(peer_class_type_filter::ssl_utp_socket
 				, m_global_class);
 		}
 		else
 		{
 			// don't add the global or local peer class to limit uTP peers
-			m_peer_class_type_filter.remove(peer_class_type_filter::utp_socket
-				, m_local_peer_class);
-			m_peer_class_type_filter.remove(peer_class_type_filter::utp_socket
+			m_peer_class_type_filter.disallow(peer_class_type_filter::utp_socket
 				, m_global_class);
-			m_peer_class_type_filter.remove(peer_class_type_filter::ssl_utp_socket
-				, m_local_peer_class);
-			m_peer_class_type_filter.remove(peer_class_type_filter::ssl_utp_socket
+			m_peer_class_type_filter.disallow(peer_class_type_filter::ssl_utp_socket
 				, m_global_class);
 		}
 	}
@@ -6893,8 +6939,7 @@ retry:
 		m_alerts.emplace_alert<dht_outgoing_get_peers_alert>(target, sent_target, ep);
 	}
 
-	// TODO: 2 perhaps DHT logging should be disabled by TORRENT_DISABLE_LOGGING
-	// too
+#ifndef TORRENT_DISABLE_LOGGING
 	TORRENT_FORMAT(3,4)
 	void session_impl::log(libtorrent::dht::dht_logger::module_t m, char const* fmt, ...)
 	{
@@ -6918,6 +6963,7 @@ retry:
 
 		m_alerts.emplace_alert<dht_pkt_alert>(pkt, len, d, node);
 	}
+#endif
 
 	bool session_impl::on_dht_request(char const* query, int query_len
 		, dht::msg const& request, entry& response)
@@ -7117,7 +7163,6 @@ retry:
 #else
 		std::set<peer_connection*> unique_peers;
 #endif
-		TORRENT_ASSERT(m_settings.get_int(settings_pack::connections_limit) > 0);
 
 		int unchokes = 0;
 		int unchokes_all = 0;

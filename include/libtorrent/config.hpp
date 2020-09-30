@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2005-2016, Arvid Norberg
+Copyright (c) 2005-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -50,7 +50,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <boost/config.hpp>
 #include <boost/asio/detail/config.hpp>
 #include <boost/version.hpp>
-#include <boost/detail/endian.hpp>
 #include <stdio.h> // for snprintf
 #include <limits.h> // for IOV_MAX
 
@@ -193,13 +192,6 @@ POSSIBILITY OF SUCH DAMAGE.
 // execinfo.h is available in the MacOS X 10.5 SDK.
 #if MAC_OS_X_VERSION_MIN_REQUIRED >= 1050
 #define TORRENT_USE_EXECINFO 1
-#endif
-
-#else // __APPLE__
-// FreeBSD has a reasonable iconv signature
-// unless we're on glibc
-#ifndef __GLIBC__
-# define TORRENT_ICONV_ARG(x) (x)
 #endif
 #endif // __APPLE__
 
@@ -344,7 +336,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #define TORRENT_USE_IFCONF 1
 #define TORRENT_USE_SYSCTL 1
 #define TORRENT_USE_IPV6 0
-#define TORRENT_ICONV_ARG(x) (x)
 #define TORRENT_USE_WRITEV 0
 #define TORRENT_USE_READV 0
 
@@ -454,10 +445,6 @@ int snprintf(char* buf, int len, char const* fmt, ...)
 #define TORRENT_OVERRIDE
 #else
 #define TORRENT_OVERRIDE override
-#endif
-
-#ifndef TORRENT_ICONV_ARG
-#define TORRENT_ICONV_ARG(x) const_cast<char**>(x)
 #endif
 
 #if defined __GNUC__ || defined __clang__
@@ -636,7 +623,7 @@ int snprintf(char* buf, int len, char const* fmt, ...)
 #endif
 
 #if !defined(TORRENT_READ_HANDLER_MAX_SIZE)
-# ifdef _GLIBCXX_DEBUG
+# if defined _GLIBCXX_DEBUG || !defined NDEBUG
 #  define TORRENT_READ_HANDLER_MAX_SIZE 400
 # else
 // if this is not divisible by 8, we're wasting space
@@ -645,7 +632,7 @@ int snprintf(char* buf, int len, char const* fmt, ...)
 #endif
 
 #if !defined(TORRENT_WRITE_HANDLER_MAX_SIZE)
-# ifdef _GLIBCXX_DEBUG
+# if defined _GLIBCXX_DEBUG || !defined NDEBUG
 #  define TORRENT_WRITE_HANDLER_MAX_SIZE 400
 # else
 // if this is not divisible by 8, we're wasting space
@@ -728,6 +715,9 @@ int snprintf(char* buf, int len, char const* fmt, ...)
 
 #endif // TORRENT_HAS_SSE
 
+namespace libtorrent {}
+
+namespace lt = libtorrent;
 
 #endif // TORRENT_CONFIG_HPP_INCLUDED
 

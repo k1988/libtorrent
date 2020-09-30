@@ -41,6 +41,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "test.hpp"
 #include "setup_transfer.hpp"
+#include "settings.hpp"
 
 void test_swarm()
 {
@@ -59,12 +60,11 @@ void test_swarm()
 	// three peers before finishing.
 	float rate_limit = 50000;
 
-	settings_pack pack;
+	settings_pack pack = settings();
 	// run the choker once per second, to make it more likely to actually trigger
 	// during the test.
 	pack.set_int(settings_pack::unchoke_interval, 1);
 
-	pack.set_int(settings_pack::alert_mask, alert::all_categories);
 	pack.set_bool(settings_pack::allow_multiple_connections_per_ip, true);
 	pack.set_int(settings_pack::choking_algorithm, settings_pack::rate_based_choker);
 	pack.set_int(settings_pack::upload_rate_limit, rate_limit);
@@ -74,6 +74,9 @@ void test_swarm()
 	pack.set_bool(settings_pack::enable_natpmp, false);
 	pack.set_bool(settings_pack::enable_upnp, false);
 	pack.set_bool(settings_pack::enable_dht, false);
+#ifndef TORRENT_NO_DEPRECATE
+	pack.set_bool(settings_pack::rate_limit_utp, true);
+#endif
 
 	pack.set_int(settings_pack::out_enc_policy, settings_pack::pe_forced);
 	pack.set_int(settings_pack::in_enc_policy, settings_pack::pe_forced);
@@ -96,7 +99,7 @@ void test_swarm()
 	torrent_handle tor2;
 	torrent_handle tor3;
 
-	boost::tie(tor1, tor2, tor3) = setup_transfer(&ses1, &ses2, &ses3, true, false, true, "_unchoke");	
+	boost::tie(tor1, tor2, tor3) = setup_transfer(&ses1, &ses2, &ses3, true, false, true, "_unchoke");
 
 	std::map<std::string, boost::int64_t> cnt = get_counters(ses1);
 
@@ -138,7 +141,7 @@ TORRENT_TEST(auto_unchoke)
 {
 	using namespace libtorrent;
 
-	// in case the previous run was t r catch (std::exception&) {}erminated
+	// in case the previous run was terminated
 	error_code ec;
 	remove_all("./tmp1_unchoke", ec);
 	remove_all("./tmp2_unchoke", ec);

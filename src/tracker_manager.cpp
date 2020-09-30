@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2003-2016, Arvid Norberg
+Copyright (c) 2003-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -45,6 +45,10 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/udp_tracker_connection.hpp"
 #include "libtorrent/aux_/session_impl.hpp"
 
+#ifdef TORRENT_USE_OPENSSL
+#include <boost/asio/ssl/context.hpp>
+#endif
+
 using boost::tuples::make_tuple;
 using boost::tuples::tuple;
 
@@ -55,7 +59,6 @@ namespace
 		minimum_tracker_response_length = 3,
 		http_buffer_size = 2048
 	};
-
 }
 
 namespace libtorrent
@@ -168,8 +171,8 @@ namespace libtorrent
 		, char const* msg, int interval, int min_interval)
 	{
 		// we need to post the error to avoid deadlock
-			get_io_service().post(boost::bind(&tracker_connection::fail_impl
-					, shared_from_this(), ec, code, std::string(msg), interval, min_interval));
+		get_io_service().post(boost::bind(&tracker_connection::fail_impl
+				, shared_from_this(), ec, code, std::string(msg), interval, min_interval));
 	}
 
 	void tracker_connection::fail_impl(error_code const& ec, int code
@@ -276,14 +279,14 @@ namespace libtorrent
 		TORRENT_ASSERT(req.num_want >= 0);
 		TORRENT_ASSERT(!m_abort || req.event == tracker_request::stopped);
 		if (m_abort && req.event != tracker_request::stopped) return;
-		if (req.event == tracker_request::stopped)
-			req.num_want = 0;
 
-		TORRENT_ASSERT(!m_abort || req.event == tracker_request::stopped);
-		if (m_abort && req.event != tracker_request::stopped)
-			return;
+#ifndef TORRENT_DISABLE_LOGGING
+		boost::shared_ptr<request_callback> cb = c.lock();
+		if (cb) cb->debug_log("*** QUEUE_TRACKER_REQUEST [ listen_port: %d ]"
+			, req.listen_port);
+#endif
 
-		std::string protocol = req.url.substr(0, req.url.find(':'));
+		std::string const protocol = req.url.substr(0, req.url.find(':'));
 
 #ifdef TORRENT_USE_OPENSSL
 		if (protocol == "http" || protocol == "https")

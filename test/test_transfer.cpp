@@ -42,6 +42,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "test.hpp"
 #include "setup_transfer.hpp"
+#include "settings.hpp"
 #include "test_utils.hpp"
 
 #include <boost/tuple/tuple.hpp>
@@ -54,8 +55,6 @@ using namespace libtorrent;
 namespace lt = libtorrent;
 
 using boost::tuples::ignore;
-
-const int mask = alert::all_categories & ~(alert::performance_warning | alert::stats_notification);
 
 int peer_disconnects = 0;
 
@@ -78,8 +77,8 @@ struct test_storage : default_storage
 		, m_limit(16 * 1024 * 2)
 	{}
 
-	virtual void set_file_priority(std::vector<boost::uint8_t> const& p
-		, storage_error& ec) {}
+	virtual void set_file_priority(std::vector<boost::uint8_t>& p
+		, storage_error& ec) TORRENT_OVERRIDE {}
 
 	void set_limit(int lim)
 	{
@@ -93,7 +92,7 @@ struct test_storage : default_storage
 		, int piece_index
 		, int offset
 		, int flags
-		, storage_error& se)
+		, storage_error& se) TORRENT_OVERRIDE
 	{
 		mutex::scoped_lock l(m_mutex);
 		if (m_written >= m_limit)
@@ -145,14 +144,16 @@ void test_transfer(int proxy_type, settings_pack const& sett
 	session_proxy p1;
 	session_proxy p2;
 
-	settings_pack pack;
+	settings_pack pack = settings();
 	pack.set_str(settings_pack::listen_interfaces, "0.0.0.0:48075");
-	pack.set_int(settings_pack::alert_mask, mask);
 
 	pack.set_bool(settings_pack::enable_upnp, false);
 	pack.set_bool(settings_pack::enable_natpmp, false);
 	pack.set_bool(settings_pack::enable_lsd, false);
 	pack.set_bool(settings_pack::enable_dht, false);
+#ifndef TORRENT_NO_DEPRECATE
+	pack.set_bool(settings_pack::rate_limit_utp, true);
+#endif
 
 	lt::session ses1(pack);
 
@@ -201,7 +202,6 @@ void test_transfer(int proxy_type, settings_pack const& sett
 	pack.set_bool(settings_pack::enable_natpmp, false);
 	pack.set_bool(settings_pack::enable_upnp, false);
 	pack.set_bool(settings_pack::enable_dht, false);
-	pack.set_int(settings_pack::alert_mask, mask);
 
 	pack.set_int(settings_pack::out_enc_policy, settings_pack::pe_disabled);
 	pack.set_int(settings_pack::in_enc_policy, settings_pack::pe_disabled);
@@ -444,6 +444,28 @@ TORRENT_TEST(coalesce_writes)
 	cleanup();
 }
 
+TORRENT_TEST(no_coalesce_reads)
+{
+	using namespace libtorrent;
+	// test allowed fast
+	settings_pack p;
+	p.set_int(settings_pack::read_cache_line_size, 16);
+	p.set_bool(settings_pack::coalesce_reads, false);
+	test_transfer(0, p, false);
+
+	cleanup();
+}
+
+TORRENT_TEST(no_coalesce_writes)
+{
+	using namespace libtorrent;
+	// test allowed fast
+	settings_pack p;
+	p.set_bool(settings_pack::coalesce_writes, false);
+	test_transfer(0, p, false);
+
+	cleanup();
+}
 
 TORRENT_TEST(allocate)
 {

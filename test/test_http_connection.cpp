@@ -121,8 +121,7 @@ void run_test(std::string const& url, int size, int status, int connected
 
 	boost::shared_ptr<http_connection> h(new http_connection(ios
 		, res, &::http_handler, true, 1024*1024, &::http_connect_handler));
-	h->get(url, seconds(1), 0, &ps, 5, "test/user-agent", address_v4::any()
-		, 0, auth);
+	h->get(url, seconds(5), 0, &ps, 5, "test/user-agent", boost::none, 0, auth);
 	ios.reset();
 	error_code e;
 	ios.run(e);
@@ -200,6 +199,14 @@ void run_suite(std::string const& protocol
 	run_test(url_base + "non-existing-file", -1, 404, 1, err(), ps);
 	run_test(url_base + "password_protected", 3216, 200, 1, error_code(), ps
 		, "testuser:testpass");
+
+	// try a very long path
+	std::string path;
+	for (int i = 0; i < 6000; ++i)
+	{
+		path += static_cast<char>(i % 26) + 'a';
+	}
+	run_test(url_base + path, 0, 404, 1, err(), ps);
 
 	// only run the tests to handle NX_DOMAIN if we have a proper internet
 	// connection that doesn't inject false DNS responses (like Comcast does)

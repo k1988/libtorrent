@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2010-2016, Arvid Norberg
+Copyright (c) 2010-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -43,7 +43,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <string>
 #include <boost/function/function1.hpp>
 #include <boost/shared_ptr.hpp>
-#include <boost/shared_ptr.hpp>
+#include <boost/noncopyable.hpp>
 
 #include "libtorrent/aux_/disable_warnings_pop.hpp"
 

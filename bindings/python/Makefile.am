@@ -1,9 +1,10 @@
 
 EXTRA_DIST = \
+  CMakeLists.txt            \
   Jamfile                   \
   setup.py                  \
+  setup.py.cmake.in         \
   client.py                 \
-  rss_reader.py             \
   simple_client.py          \
   make_torrent.py           \
   src/alert.cpp             \

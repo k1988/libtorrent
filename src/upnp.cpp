@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2007-2016, Arvid Norberg
+Copyright (c) 2007-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -40,6 +40,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/random.hpp"
 #include "libtorrent/aux_/time.hpp" // for aux::time_now()
 #include "libtorrent/aux_/escape_string.hpp" // for convert_from_native
+#include "libtorrent/http_connection.hpp"
 
 #if defined TORRENT_ASIO_DEBUGGING
 #include "libtorrent/debug.hpp"
@@ -68,6 +69,38 @@ namespace upnp_errors
 } // upnp_errors namespace
 
 static error_code ignore_error;
+
+upnp::rootdevice::rootdevice()
+	: port(0)
+	, lease_duration(default_lease_time)
+	, supports_specific_external(true)
+	, disabled(false)
+	, non_router(false)
+{
+#if TORRENT_USE_ASSERTS
+	magic = 1337;
+#endif
+}
+
+void upnp::rootdevice::close() const
+{
+	TORRENT_ASSERT(magic == 1337);
+	if (!upnp_connection) return;
+	upnp_connection->close();
+	upnp_connection.reset();
+}
+
+#if TORRENT_USE_ASSERTS
+upnp::rootdevice::~rootdevice()
+{
+	TORRENT_ASSERT(magic == 1337);
+	magic = 0;
+}
+#if __cplusplus >= 201103L
+upnp::rootdevice::rootdevice(rootdevice const&) = default;
+upnp::rootdevice& upnp::rootdevice::operator=(rootdevice const&) = default;
+#endif
+#endif
 
 upnp::upnp(io_service& ios
 	, address const& listen_interface, std::string const& user_agent
@@ -102,7 +135,7 @@ void upnp::start()
 {
 	error_code ec;
 	m_socket.open(boost::bind(&upnp::on_reply, self(), _1, _2, _3)
-		, m_refresh_timer.get_io_service(), ec);
+		, lt::get_io_service(m_refresh_timer), ec);
 
 	m_mappings.reserve(10);
 }
@@ -1126,7 +1159,7 @@ struct upnp_error_category : boost::system::error_category
 {
 	virtual const char* name() const BOOST_SYSTEM_NOEXCEPT
 	{
-		return "UPnP error";
+		return "upnp";
 	}
 
 	virtual std::string message(int ev) const BOOST_SYSTEM_NOEXCEPT

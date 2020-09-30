@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2007-2016, Arvid Norberg
+Copyright (c) 2007-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -51,6 +51,11 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <boost/bind.hpp>
 #include <string>
 #include <algorithm>
+#include <sstream>
+
+#ifdef TORRENT_USE_OPENSSL
+#include <boost/asio/ssl/context.hpp>
+#endif
 
 #include "libtorrent/aux_/disable_warnings_pop.hpp"
 
@@ -113,7 +118,7 @@ http_connection::~http_connection()
 
 void http_connection::get(std::string const& url, time_duration timeout, int prio
 	, aux::proxy_settings const* ps, int handle_redirects, std::string const& user_agent
-	, address const& bind_addr, int resolve_flags, std::string const& auth_
+	, boost::optional<address> bind_addr, int resolve_flags, std::string const& auth_
 #if TORRENT_USE_I2P
 	, i2p_connection* i2p_conn
 #endif
@@ -145,7 +150,7 @@ void http_connection::get(std::string const& url, time_duration timeout, int pri
 
 	if (ec)
 	{
-		m_timer.get_io_service().post(boost::bind(&http_connection::callback
+		lt::get_io_service(m_timer).post(boost::bind(&http_connection::callback
 			, me, ec, static_cast<char*>(NULL), 0));
 		return;
 	}
@@ -157,7 +162,7 @@ void http_connection::get(std::string const& url, time_duration timeout, int pri
 		)
 	{
 		error_code err(errors::unsupported_url_protocol);
-		m_timer.get_io_service().post(boost::bind(&http_connection::callback
+		lt::get_io_service(m_timer).post(boost::bind(&http_connection::callback
 			, me, err, static_cast<char*>(NULL), 0));
 		return;
 	}
@@ -167,13 +172,7 @@ void http_connection::get(std::string const& url, time_duration timeout, int pri
 	bool ssl = false;
 	if (protocol == "https") ssl = true;
 
-	char request[4096];
-	char* end = request + sizeof(request);
-	char* ptr = request;
-
-#define APPEND_FMT(fmt) ptr += snprintf(ptr, end - ptr, fmt)
-#define APPEND_FMT1(fmt, arg) ptr += snprintf(ptr, end - ptr, fmt, arg)
-#define APPEND_FMT2(fmt, arg1, arg2) ptr += snprintf(ptr, end - ptr, fmt, arg1, arg2)
+	std::stringstream request;
 
 	// exclude ssl here, because SSL assumes CONNECT support in the
 	// proxy and is handled at the lower layer
@@ -183,40 +182,39 @@ void http_connection::get(std::string const& url, time_duration timeout, int pri
 	{
 		// if we're using an http proxy and not an ssl
 		// connection, just do a regular http proxy request
-		APPEND_FMT1("GET %s HTTP/1.1\r\n", url.c_str());
+		request << "GET " << url << " HTTP/1.1\r\n";
 		if (ps->type == settings_pack::http_pw)
-			APPEND_FMT1("Proxy-Authorization: Basic %s\r\n", base64encode(
-				ps->username + ":" + ps->password).c_str());
+			request << "Proxy-Authorization: Basic " << base64encode(
+				ps->username + ":" + ps->password) << "\r\n";
+
+		request << "Host: " << hostname;
+		if (port != default_port) request << ":" << port << "\r\n";
+		else request << "\r\n";
 
 		hostname = ps->hostname;
 		port = ps->port;
-
-		APPEND_FMT1("Host: %s", hostname.c_str());
-		if (port != default_port) APPEND_FMT1(":%d\r\n", port);
-		else APPEND_FMT("\r\n");
 	}
 	else
 	{
-		APPEND_FMT2("GET %s HTTP/1.1\r\n"
-			"Host: %s", path.c_str(), hostname.c_str());
-		if (port != default_port) APPEND_FMT1(":%d\r\n", port);
-		else APPEND_FMT("\r\n");
+		request << "GET " << path << " HTTP/1.1\r\nHost: " << hostname;
+		if (port != default_port) request << ":" << port << "\r\n";
+		else request << "\r\n";
 	}
 
-//	APPEND_FMT("Accept: */*\r\n");
+//	request << "Accept: */*\r\n";
 
 	if (!m_user_agent.empty())
-		APPEND_FMT1("User-Agent: %s\r\n", m_user_agent.c_str());
+		request << "User-Agent: " << m_user_agent << "\r\n";
 
 	if (m_bottled)
-		APPEND_FMT("Accept-Encoding: gzip\r\n");
+		request << "Accept-Encoding: gzip\r\n";
 
 	if (!auth.empty())
-		APPEND_FMT1("Authorization: Basic %s\r\n", base64encode(auth).c_str());
+		request << "Authorization: Basic " << base64encode(auth) << "\r\n";
 
-	APPEND_FMT("Connection: close\r\n\r\n");
+	request << "Connection: close\r\n\r\n";
 
-	m_sendbuffer.assign(request);
+	m_sendbuffer.assign(request.str());
 	m_url = url;
 	start(hostname, port, timeout, prio
 		, ps, ssl, handle_redirects, bind_addr, m_resolve_flags
@@ -229,7 +227,7 @@ void http_connection::get(std::string const& url, time_duration timeout, int pri
 void http_connection::start(std::string const& hostname, int port
 	, time_duration timeout, int prio, aux::proxy_settings const* ps, bool ssl
 	, int handle_redirects
-	, address const& bind_addr
+	, boost::optional<address> bind_addr
 	, int resolve_flags
 #if TORRENT_USE_I2P
 	, i2p_connection* i2p_conn
@@ -265,7 +263,7 @@ void http_connection::start(std::string const& hostname, int port
 
 	if (ec)
 	{
-		m_timer.get_io_service().post(boost::bind(&http_connection::callback
+		lt::get_io_service(m_timer).post(boost::bind(&http_connection::callback
 			, me, ec, static_cast<char*>(NULL), 0));
 		return;
 	}
@@ -286,9 +284,12 @@ void http_connection::start(std::string const& hostname, int port
 		error_code err;
 		if (m_sock.is_open()) m_sock.close(err);
 
+		aux::proxy_settings const* proxy = ps;
+
 #if TORRENT_USE_I2P
 		bool is_i2p = false;
 		char const* top_domain = strrchr(hostname.c_str(), '.');
+		aux::proxy_settings i2p_proxy;
 		if (top_domain && strcmp(top_domain, ".i2p") == 0 && i2p_conn)
 		{
 			// this is an i2p name, we need to use the sam connection
@@ -299,23 +300,14 @@ void http_connection::start(std::string const& hostname, int port
 			// because i2p is sloooooow
 			m_completion_timeout *= 4;
 			m_read_timeout *= 4;
-		}
-#endif
 
-#if TORRENT_USE_I2P
-		if (is_i2p && i2p_conn->proxy().type != settings_pack::i2p_proxy)
-		{
-			m_timer.get_io_service().post(boost::bind(&http_connection::callback
-				, me, error_code(errors::no_i2p_router), static_cast<char*>(NULL), 0));
-			return;
-		}
-#endif
+			if (i2p_conn->proxy().type != settings_pack::i2p_proxy)
+			{
+				lt::get_io_service(m_timer).post(boost::bind(&http_connection::callback
+					, me, error_code(errors::no_i2p_router), static_cast<char*>(NULL), 0));
+				return;
+			}
 
-		aux::proxy_settings const* proxy = ps;
-#if TORRENT_USE_I2P
-		aux::proxy_settings i2p_proxy;
-		if (is_i2p)
-		{
 			i2p_proxy = i2p_conn->proxy();
 			proxy = &i2p_proxy;
 		}
@@ -338,15 +330,14 @@ void http_connection::start(std::string const& hostname, int port
 		{
 			if (m_ssl_ctx == 0)
 			{
-				m_ssl_ctx = new (std::nothrow) ssl::context(
-					m_timer.get_io_service(), ssl::context::sslv23_client);
+				m_ssl_ctx = new (std::nothrow) ssl::context(ssl::context::sslv23_client);
 				if (m_ssl_ctx)
 				{
 					m_own_ssl_context = true;
 					m_ssl_ctx->set_verify_mode(ssl::context::verify_none, ec);
 					if (ec)
 					{
-						m_timer.get_io_service().post(boost::bind(&http_connection::callback
+						lt::get_io_service(m_timer).post(boost::bind(&http_connection::callback
 								, me, ec, static_cast<char*>(NULL), 0));
 						return;
 					}
@@ -358,16 +349,16 @@ void http_connection::start(std::string const& hostname, int port
 		// assume this is not a tracker connection. Tracker connections that
 		// shouldn't be subject to the proxy should pass in NULL as the proxy
 		// pointer.
-		instantiate_connection(m_timer.get_io_service()
+		instantiate_connection(lt::get_io_service(m_timer)
 			, proxy ? *proxy : null_proxy, m_sock, userdata, NULL, false, false);
 
-		if (m_bind_addr != address_v4::any())
+		if (m_bind_addr)
 		{
-			m_sock.open(m_bind_addr.is_v4()?tcp::v4():tcp::v6(), ec);
-			m_sock.bind(tcp::endpoint(m_bind_addr, 0), ec);
+			m_sock.open(m_bind_addr->is_v4()?tcp::v4():tcp::v6(), ec);
+			m_sock.bind(tcp::endpoint(*m_bind_addr, 0), ec);
 			if (ec)
 			{
-				m_timer.get_io_service().post(boost::bind(&http_connection::callback
+				lt::get_io_service(m_timer).post(boost::bind(&http_connection::callback
 					, me, ec, static_cast<char*>(NULL), 0));
 				return;
 			}
@@ -376,7 +367,7 @@ void http_connection::start(std::string const& hostname, int port
 		setup_ssl_hostname(m_sock, hostname, ec);
 		if (ec)
 		{
-			m_timer.get_io_service().post(boost::bind(&http_connection::callback
+			lt::get_io_service(m_timer).post(boost::bind(&http_connection::callback
 				, me, ec, static_cast<char*>(NULL), 0));
 			return;
 		}
@@ -495,27 +486,23 @@ void http_connection::close(bool force)
 #if TORRENT_USE_I2P
 void http_connection::connect_i2p_tracker(char const* destination)
 {
+	TORRENT_ASSERT(m_sock.get<i2p_stream>());
 #ifdef TORRENT_USE_OPENSSL
 	TORRENT_ASSERT(m_ssl == false);
-	TORRENT_ASSERT(m_sock.get<socket_type>());
-	TORRENT_ASSERT(m_sock.get<socket_type>()->get<i2p_stream>());
-	m_sock.get<socket_type>()->get<i2p_stream>()->set_destination(destination);
-	m_sock.get<socket_type>()->get<i2p_stream>()->set_command(i2p_stream::cmd_connect);
-	m_sock.get<socket_type>()->get<i2p_stream>()->set_session_id(m_i2p_conn->session_id());
-#else
+#endif
 	m_sock.get<i2p_stream>()->set_destination(destination);
 	m_sock.get<i2p_stream>()->set_command(i2p_stream::cmd_connect);
 	m_sock.get<i2p_stream>()->set_session_id(m_i2p_conn->session_id());
-#endif
 #if defined TORRENT_ASIO_DEBUGGING
 	add_outstanding_async("http_connection::on_connect");
 #endif
+	TORRENT_ASSERT(!m_connecting);
+	m_connecting = true;
 	m_sock.async_connect(tcp::endpoint(), boost::bind(&http_connection::on_connect
 		, shared_from_this(), _1));
 }
 
-void http_connection::on_i2p_resolve(error_code const& e
-	, char const* destination)
+void http_connection::on_i2p_resolve(error_code const& e, char const* destination)
 {
 #if defined TORRENT_ASIO_DEBUGGING
 	complete_async("http_connection::on_i2p_resolve");
@@ -562,10 +549,10 @@ void http_connection::on_resolve(error_code const& e
 	// sort the endpoints so that the ones with the same IP version as our
 	// bound listen socket are first. So that when contacting a tracker,
 	// we'll talk to it from the same IP that we're listening on
-	if (m_bind_addr != address_v4::any())
+	if (m_bind_addr)
 		std::partition(m_endpoints.begin(), m_endpoints.end()
 			, boost::bind(&address::is_v4, boost::bind(&tcp::endpoint::address, _1))
-				== m_bind_addr.is_v4());
+				== m_bind_addr->is_v4());
 #endif
 
 	connect();

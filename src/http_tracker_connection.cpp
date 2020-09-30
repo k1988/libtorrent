@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2003-2016, Arvid Norberg
+Copyright (c) 2003-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -70,9 +70,6 @@ namespace libtorrent
 		, boost::weak_ptr<request_callback> c)
 		: tracker_connection(man, req, ios, c)
 		, m_man(man)
-#if TORRENT_USE_I2P
-		, m_i2p_conn(NULL)
-#endif
 	{}
 
 	void http_tracker_connection::start()
@@ -94,7 +91,7 @@ namespace libtorrent
 		}
 
 #if TORRENT_USE_I2P
-		bool i2p = is_i2p_url(url);
+		bool const i2p = is_i2p_url(url);
 #else
 		static const bool i2p = false;
 #endif
@@ -186,6 +183,17 @@ namespace libtorrent
 			}
 		}
 
+		if (tracker_req().ipv4 != address_v4() && !i2p)
+		{
+			error_code err;
+			std::string const ip = tracker_req().ipv4.to_string(err);
+			if (!err)
+			{
+				url += "&ipv4=";
+				url += escape_string(ip.c_str(), ip.size());
+			}
+		}
+
 #if TORRENT_USE_IPV6
 		if (tracker_req().ipv6 != address_v6() && !i2p)
 		{
@@ -227,7 +235,7 @@ namespace libtorrent
 		m_tracker_connection->get(url, seconds(timeout)
 			, tracker_req().event == tracker_request::stopped ? 2 : 1
 			, ps.proxy_tracker_connections ? &ps : NULL
-			, 5, user_agent, bind_interface()
+			, 5, user_agent, tracker_req().bind_ip
 			, tracker_req().event == tracker_request::stopped
 				? resolver_interface::cache_only : 0
 				| resolver_interface::abort_on_shutdown
@@ -425,7 +433,7 @@ namespace libtorrent
 	}
 
 	tracker_response parse_tracker_response(char const* data, int size, error_code& ec
-		, int flags, sha1_hash scrape_ih)
+		, int const flags, sha1_hash scrape_ih)
 	{
 		tracker_response resp;
 
@@ -443,7 +451,7 @@ namespace libtorrent
 		int interval = int(e.dict_find_int_value("interval", 0));
 		// if no interval is specified, default to 30 minutes
 		if (interval == 0) interval = 1800;
-		int min_interval = int(e.dict_find_int_value("min interval", 30));
+		int const min_interval = int(e.dict_find_int_value("min interval", 30));
 
 		resp.interval = interval;
 		resp.min_interval = min_interval;

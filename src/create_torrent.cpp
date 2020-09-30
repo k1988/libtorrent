@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2008-2016, Arvid Norberg
+Copyright (c) 2008-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -245,11 +245,29 @@ namespace libtorrent
 			, default_pred, flags);
 	}
 
+namespace {
+	struct disk_aborter
+	{
+		disk_aborter(disk_io_thread& dio) : m_dio(dio) {}
+		~disk_aborter() { m_dio.abort(true); }
+	private:
+		disk_aborter(disk_aborter const&);
+		disk_aborter& operator=(disk_aborter const);
+		disk_io_thread& m_dio;
+	};
+}
+
 	void set_piece_hashes(create_torrent& t, std::string const& p
 		, boost::function<void(int)> const& f, error_code& ec)
 	{
 		// optimized path
+#ifdef TORRENT_BUILD_SIMULATOR
+		sim::default_config conf;
+		sim::simulation sim{conf};
+		io_service ios{sim};
+#else
 		io_service ios;
+#endif
 
 #if TORRENT_USE_UNC_PATHS
 		std::string path = canonicalize_path(p);
@@ -273,7 +291,12 @@ namespace libtorrent
 		boost::shared_ptr<char> dummy;
 		counters cnt;
 		disk_io_thread disk_thread(ios, cnt, 0);
+#ifdef TORRENT_BUILD_SIMULATOR
+		disk_thread.set_num_threads(0);
+#else
 		disk_thread.set_num_threads(1);
+#endif
+		disk_aborter da(disk_thread);
 
 		storage_params params;
 		params.files = &t.files();
@@ -289,7 +312,7 @@ namespace libtorrent
 
 		settings_pack sett;
 		sett.set_int(settings_pack::cache_size, 0);
-		sett.set_int(settings_pack::aio_threads, 2);
+		sett.set_int(settings_pack::aio_threads, 3);
 
 		// TODO: this should probably be optional
 		alert_manager dummy2(0, 0);
@@ -297,8 +320,9 @@ namespace libtorrent
 
 		int piece_counter = 0;
 		int completed_piece = 0;
-		int piece_read_ahead = 15 * 1024 * 1024 / t.piece_length();
-		if (piece_read_ahead < 1) piece_read_ahead = 1;
+		int piece_read_ahead = 16 * 1024 * 1024 / t.piece_length();
+		// at least 4 jobs at a time per thread
+		if (piece_read_ahead < 12) piece_read_ahead = 12;
 
 		for (int i = 0; i < piece_read_ahead; ++i)
 		{
@@ -309,7 +333,12 @@ namespace libtorrent
 			if (piece_counter >= t.num_pieces()) break;
 		}
 		disk_thread.submit_jobs();
+
+#ifdef TORRENT_BUILD_SIMULATOR
+		sim.run();
+#else
 		ios.run(ec);
+#endif
 	}
 
 	create_torrent::~create_torrent() {}
@@ -332,16 +361,20 @@ namespace libtorrent
 		// a piece_size of 0 means automatic
 		if (piece_size == 0 && !m_merkle_torrent)
 		{
-			const int target_size = 40 * 1024;
-			piece_size = int(fs.total_size() / (target_size / 20));
+			// size_table is computed from the following:
+			//   target_list_size = sqrt(total_size) * 2;
+			//   target_piece_size = total_size / (target_list_size / hash_size);
+			// Given hash_size = 20 bytes, target_piece_size = (16*1024 * pow(2, i))
+			// we can determine size_table = (total_size = pow(2 * target_piece_size / hash_size, 2))
+			boost::int64_t const size_table[] = {2684355, 10737418, 42949673, 171798692, 687194767,
+				2748779069LL, 10995116278LL, 43980465111LL, 175921860444LL, 703687441777LL};
 
-			int i = 16*1024;
-			for (; i < 2*1024*1024; i *= 2)
+			int i = 0;
+			for (int max = sizeof(size_table) / sizeof(size_table[0]); i < max; ++i)
 			{
-				if (piece_size > i) continue;
-				break;
+				if (size_table[i] >= fs.total_size()) break;
 			}
-			piece_size = i;
+			piece_size = 0x4000 << i;
 		}
 		else if (piece_size == 0 && m_merkle_torrent)
 		{

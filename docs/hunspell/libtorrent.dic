@@ -84,6 +84,8 @@ pread
 preadv
 pwrite
 pwritev
+readv
+writev
 ftruncate
 iovec
 uint8
@@ -187,3 +189,5 @@ src
 'fingerprints'
 'query'
 'ro'
+pre-partfile
+pre

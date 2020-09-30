@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2008-2016, Arvid Norberg
+Copyright (c) 2008-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -131,6 +131,8 @@ namespace libtorrent
 					start = parse_int(start, end, ':', len, e);
 					if (e)
 						TORRENT_FAIL_BDECODE(e);
+					if (start == end)
+						TORRENT_FAIL_BDECODE(bdecode_errors::expected_colon);
 
 					// remaining buffer size excluding ':'
 					const ptrdiff_t buff_size = end - start - 1;
@@ -203,6 +205,8 @@ namespace libtorrent
 					start = parse_int(start, end, ':', len, e);
 					if (e)
 						TORRENT_FAIL_BDECODE(e);
+					if (start == end)
+						TORRENT_FAIL_BDECODE(bdecode_errors::expected_colon);
 
 					// remaining buffer size excluding ':'
 					const ptrdiff_t buff_size = end - start - 1;

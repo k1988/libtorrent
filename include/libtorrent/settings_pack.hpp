@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2012-2016, Arvid Norberg
+Copyright (c) 2012-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -66,6 +66,7 @@ namespace libtorrent
 	TORRENT_EXTRA_EXPORT boost::shared_ptr<settings_pack> load_pack_from_dict(bdecode_node const& settings);
 	TORRENT_EXTRA_EXPORT void save_settings_to_dict(aux::session_settings const& s, entry::dictionary_type& sett);
 	TORRENT_EXTRA_EXPORT void apply_pack(settings_pack const* pack, aux::session_settings& sett, aux::session_impl* ses = 0);
+	TORRENT_EXTRA_EXPORT void run_all_updates(aux::session_impl& ses);
 
 	TORRENT_EXPORT int setting_by_name(std::string const& name);
 	TORRENT_EXPORT char const* name_for_setting(int s);
@@ -92,7 +93,7 @@ namespace libtorrent
 	//
 	struct TORRENT_EXPORT settings_pack
 	{
-		friend void apply_pack(settings_pack const* pack, aux::session_settings& sett, aux::session_impl* ses);
+		friend TORRENT_EXTRA_EXPORT void apply_pack(settings_pack const* pack, aux::session_settings& sett, aux::session_impl* ses);
 
 		void set_str(int name, std::string val);
 		void set_int(int name, int val);
@@ -226,7 +227,7 @@ namespace libtorrent
 
 			// this is the fingerprint for the client. It will be used as the
 			// prefix to the peer_id. If this is 20 bytes (or longer) it will be
-			// truncated at 20 bytes and used as the entire peer-id
+			// truncated to 20 bytes and used as the entire peer-id
 			// 
 			// There is a utility function, generate_fingerprint() that can be used
 			// to generate a standard client peer ID fingerprint prefix.
@@ -501,10 +502,10 @@ namespace libtorrent
 			no_recheck_incomplete_resume,
 
 			// ``anonymous_mode`` defaults to false. When set to true, the client
-			// tries to hide its identity to a certain degree. The peer-ID will no
-			// longer include the client's fingerprint. The user-agent will be
-			// reset to an empty string. Trackers will only be used if they are
-			// using a proxy server. The listen sockets are closed, and incoming
+			// tries to hide its identity to a certain degree. The user-agent will be
+			// reset to an empty string (except for private torrents). Trackers
+			// will only be used if they are using a proxy server.
+			// The listen sockets are closed, and incoming
 			// connections will only be accepted through a SOCKS5 or I2P proxy (if
 			// a peer proxy is set up and is run on the same machine as the
 			// tracker proxy). Since no incoming connections are accepted,
@@ -521,9 +522,9 @@ namespace libtorrent
 			// libtorrent API.
 			report_web_seed_downloads,
 
+#ifndef TORRENT_NO_DEPRECATE
 			// set to true if uTP connections should be rate limited This option
 			// is *DEPRECATED*, please use set_peer_class_filter() instead.
-#ifndef TORRENT_NO_DEPRECATE
 			rate_limit_utp TORRENT_DEPRECATED_ENUM,
 #else
 			deprecated2,
@@ -608,9 +609,7 @@ namespace libtorrent
 			// proxy_type and proxy_hostname settings. The listen sockets are
 			// closed, and incoming connections will only be accepted through a
 			// SOCKS5 or I2P proxy (if a peer proxy is set up and is run on the
-			// same machine as the tracker proxy). This setting also disabled peer
-			// country lookups, since those are done via DNS lookups that aren't
-			// supported by proxies.
+			// same machine as the tracker proxy).
 			force_proxy,
 
 			// if false, prevents libtorrent to advertise share-mode support
@@ -855,7 +854,7 @@ namespace libtorrent
 			//   the most recent pieces that are in the read cache.
 			suggest_mode,
 
-			// ``max_queued_disk_bytes`` is the number maximum number of bytes, to
+			// ``max_queued_disk_bytes`` is the maximum number of bytes, to
 			// be written to disk, that can wait in the disk I/O thread queue.
 			// This queue is only for waiting for the disk I/O thread to receive
 			// the job and either write it to disk or insert it in the write
@@ -900,7 +899,7 @@ namespace libtorrent
 			// 
 			// * ``fixed_slots_choker`` is the traditional choker with a fixed
 			//   number of unchoke slots (as specified by
-			//   ``session::set_max_uploads()``).
+			//   ``settings_pack::unchoke_slots_limit``).
 			// 
 			// * ``rate_based_choker`` opens up unchoke slots based on the upload
 			//   rate achieved to peers. The more slots that are opened, the
@@ -1407,6 +1406,7 @@ namespace libtorrent
 			// them starting up. The normal connect scheduler is run once every
 			// second, this allows peers to be connected immediately instead of
 			// waiting for the session tick to trigger connections.
+			// This may not be set higher than 255.
 			torrent_connect_boost,
 
 			// ``alert_queue_size`` is the maximum number of alerts queued up
@@ -1481,8 +1481,10 @@ namespace libtorrent
 			// when a seeding torrent reaches either the share ratio (bytes up /
 			// bytes down) or the seed time ratio (seconds as seed / seconds as
 			// downloader) or the seed time limit (seconds as seed) it is
-			// considered done, and it will leave room for other torrents these
-			// are specified as percentages
+			// considered done, and it will leave room for other torrents. These
+			// are specified as percentages. Torrents that are considered done will
+			// still be allowed to be seeded, they just won't have priority anymore.
+			// For more, see queuing_.
 			share_ratio_limit,
 			seed_time_ratio_limit,
 
@@ -1605,6 +1607,11 @@ namespace libtorrent
 			// This defaults to 120 seconds on windows, and disabled on other
 			// systems.
 			close_file_interval,
+
+			// When uTP experiences packet loss, it will reduce the congestion
+			// window, and not reduce it again for this many milliseconds, even if
+			// experiencing another lost packet.
+			utp_cwnd_reduce_timer,
 
 			max_int_setting_internal
 		};

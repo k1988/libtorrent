@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2003-2016, Arvid Norberg
+Copyright (c) 2003-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -214,7 +214,7 @@ namespace libtorrent
 	};
 
 	// for boost::hash (and to support using this type in unordered_map etc.)
-	std::size_t hash_value(torrent_handle const& h);
+	TORRENT_EXPORT std::size_t hash_value(torrent_handle const& h);
 
 	// You will usually have to store your torrent handles somewhere, since it's
 	// the object through which you retrieve information about the torrent and
@@ -257,7 +257,7 @@ namespace libtorrent
 		friend struct session_handle;
 		friend struct feed;
 		friend class torrent;
-		friend std::size_t hash_value(torrent_handle const& th);
+		friend TORRENT_EXPORT std::size_t hash_value(torrent_handle const& th);
 
 		// constructs a torrent handle that does not refer to a torrent.
 		// i.e. is_valid() will return false.
@@ -603,6 +603,11 @@ namespace libtorrent
 		// for the state_changed_alert and then call pause(). The download/seeding
 		// will most likely start in between posting the alert and receiving the
 		// call to pause.
+		// 
+		// A downloading state is one where peers are being connected. Which means
+		// just downloading the metadata via the ``ut_metadata`` extension counts
+		// as a downloading state. In order to stop a torrent once the metadata
+		// has been downloaded, instead set all file priorities to dont_download
 		void stop_when_ready(bool b) const;
 
 		// Explicitly sets the upload mode of the torrent. In upload mode, the
@@ -741,9 +746,8 @@ namespace libtorrent
 		//	extern int outstanding_resume_data; // global counter of outstanding resume data
 		//	std::vector<torrent_handle> handles = ses.get_torrents();
 		//	ses.pause();
-		//	for (torrent_handle i : handles)
+		//	for (torrent_handle const& h : handles)
 		//	{
-		//		torrent_handle& h = *i;
 		//		if (!h.is_valid()) continue;
 		//		torrent_status s = h.status();
 		//		if (!s.has_metadata) continue;
@@ -758,7 +762,7 @@ namespace libtorrent
 		//		alert const* a = ses.wait_for_alert(seconds(10));
 		//
 		//		// if we don't get an alert within 10 seconds, abort
-		//		if (a == 0) break;
+		//		if (a == nullptr) break;
 		//		
 		//		std::vector<alert*> alerts;
 		//		ses.pop_alerts(&alerts);
@@ -773,7 +777,7 @@ namespace libtorrent
 		//			}
 		//
 		//			save_resume_data_alert const* rd = alert_cast<save_resume_data_alert>(a);
-		//			if (rd == 0)
+		//			if (rd == nullptr)
 		//			{
 		//				process_alert(a);
 		//				continue;
@@ -807,9 +811,10 @@ namespace libtorrent
 		// time.
 		//
 		//.. note::
-		//	A torrent's resume data is considered saved as soon as the alert is
-		//	posted. It is important to make sure this alert is received and
-		//	handled in order for this function to be meaningful.
+		//	A torrent's resume data is considered saved as soon as the
+		//	save_resume_data_alert is posted. It is important to make sure this
+		//	alert is received and handled in order for this function to be
+		//	meaningful.
 		bool need_save_resume_data() const;
 
 		// changes whether the torrent is auto managed or not. For more info,
@@ -1022,9 +1027,8 @@ namespace libtorrent
 		// The default priority of pieces is 4.
 		// 
 		// Piece priorities can not be changed for torrents that have not
-		// downloaded the metadata yet. For instance, magnet links and torrents
-		// added by URL won't have metadata immediately. see the
-		// metadata_received_alert.
+		// downloaded the metadata yet. Magnet links won't have metadata
+		// immediately. see the metadata_received_alert.
 		// 
 		// ``piece_priority`` sets or gets the priority for an individual piece,
 		// specified by ``index``.
@@ -1041,6 +1045,10 @@ namespace libtorrent
 		// 
 		// ``piece_priorities`` returns a vector with one element for each piece
 		// in the torrent. Each element is the current priority of that piece.
+		// 
+		// It's possible to cancel the effect of *file* priorities by setting the
+		// priorities for the affected pieces. Care has to be taken when mixing
+		// usage of file- and piece priorities.
 		void piece_priority(int index, int priority) const;
 		int piece_priority(int index) const;
 		void prioritize_pieces(std::vector<int> const& pieces) const;
@@ -1069,10 +1077,29 @@ namespace libtorrent
 		// You cannot set the file priorities on a torrent that does not yet have
 		// metadata or a torrent that is a seed. ``file_priority(int, int)`` and
 		// prioritize_files() are both no-ops for such torrents.
+		// 
+		// Since changing file priorities may involve disk operations (of moving
+		// files in- and out of the part file), the internal accounting of file
+		// priorities happen asynchronously. i.e. setting file priorities and then
+		// immediately querying them may not yield the same priorities just set.
+		// However, the *piece* priorities are updated immediately.
+		// 
+		// when combining file- and piece priorities, the resume file will record
+		// both. When loading the resume data, the file priorities will be applied
+		// first, then the piece priorities.
 		void file_priority(int index, int priority) const;
 		int file_priority(int index) const;
 		void prioritize_files(std::vector<int> const& files) const;
 		std::vector<int> file_priorities() const;
+
+		// flags to be used with force_reannounce
+		enum reannounce_flags_t
+		{
+			// by default, force-reannounce will still honor the min-interval
+			// published by the tracker. If this flag is set, it will be ignored
+			// and the tracker is announced immediately.
+			ignore_min_interval = 1
+		};
 
 		// ``force_reannounce()`` will force this torrent to do another tracker
 		// request, to receive new peers. The ``seconds`` argument specifies how
@@ -1086,9 +1113,13 @@ namespace libtorrent
 		// The ``tracker_index`` argument specifies which tracker to re-announce.
 		// If set to -1 (which is the default), all trackers are re-announce.
 		// 
+		// The ``flags`` argument can be used to affect the re-announce. See
+		// reannounce_flags_t.
+		// 
 		// ``force_dht_announce`` will announce the torrent to the DHT
 		// immediately.
 		void force_reannounce(int seconds = 0, int tracker_index = -1) const;
+		void force_reannounce(int seconds, int tracker_index, int flags) const;
 		void force_dht_announce() const;
 
 #ifndef TORRENT_NO_DEPRECATE
@@ -1254,9 +1285,13 @@ namespace libtorrent
 		// fails, ask the user which mode to use. The client may then re-issue
 		// the ``move_storage`` call with one of the other modes.
 		// 
-		// ``dont_replace`` always takes the existing file in the target
+		// ``dont_replace`` always keeps the existing file in the target
 		// directory, if there is one. The source files will still be removed in
-		// that case.
+		// that case. Note that it won't automatically re-check files. If an
+		// incomplete torrent is moved into a directory with the complete files,
+		// pause, move, force-recheck and resume. Without the re-checking, the
+		// torrent will keep downloading and files in the new download directory
+		// will be overwritten.
 		// 
 		// Files that have been renamed to have absolute paths are not moved by
 		// this function. Keep in mind that files that don't belong to the
@@ -1303,9 +1338,9 @@ namespace libtorrent
 		boost::uint32_t id() const
 		{
 			uintptr_t ret = reinterpret_cast<uintptr_t>(m_torrent.lock().get());
-			// a torrent object is about 1024 bytes, so
-			// it's safe to shift 11 bits
-			return boost::uint32_t(ret >> 11);
+			// a torrent object is about 1024 (2^10) bytes, so
+			// it's safe to shift 10 bits
+			return boost::uint32_t(ret >> 10);
 		}
 
 		// This function is intended only for use by plugins and the alert

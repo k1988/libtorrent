@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2003-2016, Arvid Norberg
+Copyright (c) 2003-2018, Arvid Norberg
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -256,6 +256,7 @@ namespace libtorrent
 		// returns a pretty-printed string representation
 		// of the bencoded structure, with JSON-style syntax
 		std::string to_string() const;
+		std::string to_string(bool single_line) const;
 
 	protected:
 
@@ -265,7 +266,7 @@ namespace libtorrent
 
 	private:
 
-		void to_string_impl(std::string& out, int indent) const;
+		void to_string_impl(std::string& out, int indent, bool single_line) const;
 
 #if (defined(_MSC_VER) && _MSC_VER < 1310) || TORRENT_COMPLETE_TYPES_REQUIRED
 		// workaround for msvc-bug.
